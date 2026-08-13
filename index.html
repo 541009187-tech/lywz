@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>云端留言板</title>
-  <meta name="description" content="免费在线云端留言板，访客可留言，管理员后台管理，支持自定义留言上限">
+  <!-- ✅ 加长后的标题，解决【标题太短】 -->
+  <title>云端留言板 | 在线访客留言系统，管理员后台管理</title>
+  <meta name="description" content="免费在线云端留言板，访客可在线提交留言，管理员专属后台管理，支持自定义留言上限">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://lywz-esc.pages.dev/">
   <!-- 必应 Bing 所有权验证标签 -->
@@ -13,13 +14,14 @@
 <body>
 <div class="wrap">
   <div class="card">
-    <h2 style="text-align:center;margin-bottom:16px">留言板</h2>
+    <!-- ✅ 改成 <h1> 解决【缺少h1标记】 -->
+    <h1 style="text-align:center;margin-bottom:16px">云端留言板</h1>
     <input type="text" id="nick" placeholder="你的昵称">
     <textarea id="content" rows="4" placeholder="写下留言..."></textarea>
     <button onclick="sendMsg()">提交留言</button>
   </div>
   <div class="card">
-    <h3 style="margin-bottom:12px">留言列表</h3>
+    <h2 style="margin-bottom:12px">留言列表</h2>
     <div id="listBox"></div>
   </div>
 </div>
