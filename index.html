@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>云端留言板</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", Arial, sans-serif;
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 640px;
+      margin: 30px auto;
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    h2 {
+      text-align: center;
+      color: #1f2937;
+      margin-bottom: 24px;
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .nick-wrap{
+      margin-bottom:12px;
+    }
+    #nick{
+      width:100%;
+      padding:12px 14px;
+      border:1px solid #d1d5db;
+      border-radius:12px;
+      font-size:16px;
+      outline:none;
+    }
+    #nick:focus{
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      border: 1px solid #d1d5db;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 16px;
+      resize: none;
+      outline: none;
+      background: #f9fafb;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    textarea:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    button {
+      margin-top: 16px;
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(59, 130, 246, 0.35);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .list {
+      margin-top: 24px;
+    }
+
+    .msg-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      background: #fafafa;
+      transition: background 0.2s;
+    }
+
+    .msg-item:hover {
+      background: #f3f4f6;
+    }
+
+    .top-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .nick{
+      font-weight:bold;
+      color:#2563eb;
+    }
+    .time {
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .del-btn{
+      padding:4px 10px;
+      background:#ef4444;
+      color:#fff;
+      border:none;
+      border-radius:6px;
+      font-size:13px;
+      width:auto;
+      margin-top:0;
+      cursor:pointer;
+    }
+    .content {
+      font-size: 16px;
+      color: #1f2937;
+      line-height: 1.6;
+    }
+
+    .empty {
+      text-align: center;
+      color: #9ca3af;
+      padding: 30px 0;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>云端留言板</h2>
+  <div class="nick-wrap">
+    <input id="nick" placeholder="输入昵称">
+  </div>
+  <textarea id="txt" placeholder="写留言"></textarea>
+  <button onclick="send()">提交留言</button>
+  <div id="list" class="list"></div>
+</div>
+
+<script>
+  // =========管理员账号密码=========
+  const ADMIN_NAME = "管理员";
+  const ADMIN_PWD = "xiaojun99";
+  // ================================
+
+  if(localStorage.getItem("mynick")){
+    nick.value = localStorage.getItem("mynick");
+  }
+
+  async function load(){
+    const res = await fetch("/msg");
+    const arr = await res.json();
+    const myNick = nick.value.trim();
+    const myText = txt.value.trim();
+    // 判断管理员：昵称【管理员】 并且 当前留言框内容等于密码xiaojun99
+    const isAdmin = (myNick === ADMIN_NAME) && (myText === ADMIN_PWD);
+
+    if (arr.length === 0) {
+      document.getElementById("list").innerHTML = '<div class="empty">暂无留言，快来抢沙发吧</div>';
+      return;
+    }
+
+    document.getElementById("list").innerHTML = arr.reverse().map((item,idx) => {
+      const canShowDelBtn = (item.nick === myNick) || isAdmin;
+      return `
+      <div class="msg-item">
+        <div class="top-row">
+          <span class="nick">${item.nick}</span>
+          <span class="time">${item.t}</span>
+          ${canShowDelBtn ? `<button class="del-btn" onclick="del(${arr.length-1-idx})">删除</button>` : ""}
+        </div>
+        <div class="content">${item.c}</div>
+      </div>
+      `
+    }).join("");
+  }
+
+  async function send(){
+    const content = txt.value.trim();
+    const sendNick = nick.value.trim();
+    if(!sendNick){
+      alert("请填写昵称！");
+      return;
+    }
+    if(!content){
+      alert("不能空白");
+      return;
+    }
+    localStorage.setItem("mynick", sendNick);
+
+    await fetch("/msg",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({c:content, nick: sendNick})
+    });
+
+    txt.value = "";
+    load();
+  }
+
+  async function del(index){
+    if(!confirm("确定删除这条留言？"))return;
+    const myNick = nick.value.trim();
+    const myText = txt.value.trim();
+    await fetch("/msg",{
+      method:"DELETE",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        idx:index,
+        nick: myNick,
+        text: myText
+      })
+    });
+    load();
+  }
+
+  load();
+  setInterval(load, 10000);
+</script>
+
+</body>
+</html>
