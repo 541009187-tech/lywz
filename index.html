@@ -1,83 +1,114 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- ✅ 加长后的标题，解决【标题太短】 -->
-  <title>云端留言板 | 在线访客留言系统，管理员后台管理</title>
-  <meta name="description" content="免费在线云端留言板，访客可在线提交留言，管理员专属后台管理，支持自定义留言上限">
-  <meta name="robots" content="index,follow">
-  <link rel="canonical" href="https://lywz-esc.pages.dev/">
-  <!-- 必应 Bing 所有权验证标签 -->
-  <meta name="msvalidate.01" content="5375C1040004CDBEFCF73F7C9133AD5E" />
+<meta charset="UTF-8">
+<!-- 移动端必须加这个！之前大概率缺了，手机布局乱+JS异常 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>云端留言板</title>
+<meta name="msvalidate.01" content="5375C1040004CDBEFCF73F7C9133AD5E" />
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,sans-serif;}
+body{padding:16px;max-width:720px;margin:0 auto;background:#f6f7f9;color:#222;}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px #00000012;}
+input,textarea{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;margin:8px 0;font-size:16px;}
+button{width:100%;padding:14px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:16px;touch-action:manipulation;cursor:pointer;}
+.msg-item{border-bottom:1px solid #eee;padding:12px 0;}
+.msg-name{font-weight:bold;color:#2563eb;}
+.msg-time{font-size:12px;color:#888;margin:4px 0;}
+.msg-content{word-break:break-all;}
+</style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <!-- ✅ 改成 <h1> 解决【缺少h1标记】 -->
-    <h1 style="text-align:center;margin-bottom:16px">云端留言板</h1>
-    <input type="text" id="nick" placeholder="你的昵称">
-    <textarea id="content" rows="4" placeholder="写下留言..."></textarea>
-    <button onclick="sendMsg()">提交留言</button>
-  </div>
-  <div class="card">
-    <h2 style="margin-bottom:12px">留言列表</h2>
-    <div id="listBox"></div>
-  </div>
+<div class="card">
+  <h3>📝发表留言</h3>
+  <input id="name" placeholder="昵称" autocomplete="off">
+  <textarea id="content" rows="4" placeholder="写下留言..." autocomplete="off"></textarea>
+  <button id="submitBtn">提交留言</button>
 </div>
-<style>
-    * {box-sizing: border-box;margin:0;padding:0;font-family:Microsoft YaHei}
-    body{background:#f1f5f9;padding:20px}
-    .wrap{max-width:600px;margin:0 auto}
-    .card{background:#fff;border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 2px 10px #00000008}
-    input,textarea{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:12px;font-size:16px;margin-bottom:12px}
-    button{width:100%;padding:13px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-size:16px;cursor:pointer}
-    .msg-item{border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:10px}
-    .msg-nick{font-weight:bold;color:#2563eb}
-    .msg-time{font-size:12px;color:#64748b}
-    .msg-text{margin-top:6px;line-height:1.6}
-</style>
+
+<div class="card">
+  <h3>📋全部留言</h3>
+  <div id="msgList"></div>
+</div>
+
 <script>
-  const ADMIN_BACKEND_URL = "https://lybht.pages.dev";
-  const API = "";
-  const ADMIN_ACCOUNT = "管理员";
+const msgList = document.getElementById('msgList');
+const submitBtn = document.getElementById('submitBtn');
+const nameInp = document.getElementById('name');
+const contentInp = document.getElementById('content');
 
-  async function load(){
-    const res=await fetch(`${API}/msg`)
-    const d=await res.json()
-    const list=d.list||[]
-    let html=""
-    for(let i=list.length-1;i>=0;i--){
-      const it=list[i]
-      html+=`<div class="msg-item">
-        <div class="msg-nick">${it.nick}</div>
-        <div class="msg-time">${it.t}</div>
-        <div class="msg-text">${it.c}</div>
-      </div>`
-    }
-    document.getElementById("listBox").innerHTML=html
+// 加载留言（修复：健壮JSON解析，捕获异常）
+async function loadMsg(){
+  try{
+    const res = await fetch('/api/msg');
+    const data = await res.json();
+    render(data)
+  }catch(e){
+    console.error('读取留言失败',e);
+    msgList.innerHTML = '<p style="color:red">加载失败，请刷新</p>';
   }
+}
+// 渲染留言
+function render(list){
+  msgList.innerHTML = '';
+  if(!list || !list.length){
+    msgList.innerHTML = '<p>暂无留言</p>';
+    return;
+  }
+  list.forEach(item=>{
+    const div = document.createElement('div');
+    div.className = 'msg-item';
+    div.innerHTML = `
+      <div class="msg-name">${escapeHtml(item.name)}</div>
+      <div class="msg-time">${item.time}</div>
+      <div class="msg-content">${escapeHtml(item.content)}</div>
+    `;
+    msgList.appendChild(div);
+  })
+}
+// 防XSS
+function escapeHtml(str){
+  return String(str)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;")
+}
 
-  async function sendMsg(){
-    const nick=document.getElementById("nick").value.trim()
-    const c=document.getElementById("content").value.trim()
-
-    if(nick === ADMIN_ACCOUNT){
-      location.href = ADMIN_BACKEND_URL;
-      return;
-    }
-
-    if(!nick||!c)return alert("昵称和留言不能为空")
-    await fetch(`${API}/msg`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({nick,c})
+// 提交留言（修复移动端点击、提交成功强制重载、异常兜底）
+submitBtn.addEventListener('click',async ()=>{
+  const name = nameInp.value.trim();
+  const content = contentInp.value.trim();
+  if(!name || !content) return alert('昵称和留言不能为空');
+  submitBtn.disabled = true;
+  submitBtn.textContent = '提交中...';
+  try{
+    const res = await fetch('/api/msg',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,content})
     })
-    document.getElementById("content").value=""
-    load()
+    const ret = await res.json();
+    if(ret.ok){
+      alert('留言成功！');
+      nameInp.value = '';
+      contentInp.value = '';
+      await loadMsg(); // ✅提交成功立刻重载列表
+    }else{
+      alert('失败：'+ret.msg)
+    }
+  }catch(e){
+    console.error(e);
+    alert('网络异常，请重试');
+  }finally{
+    submitBtn.disabled = false;
+    submitBtn.textContent = '提交留言';
   }
+})
 
-  load()
-  setInterval(load,10000)
+// 页面打开自动加载
+loadMsg();
 </script>
 </body>
+</html>
