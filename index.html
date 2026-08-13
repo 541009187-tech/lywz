@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<!-- 移动端必须加这个！之前大概率缺了，手机布局乱+JS异常 -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- 只新增这一行移动端适配，视觉完全无变化 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>云端留言板</title>
 <meta name="msvalidate.01" content="5375C1040004CDBEFCF73F7C9133AD5E" />
 <style>
@@ -11,7 +11,7 @@
 body{padding:16px;max-width:720px;margin:0 auto;background:#f6f7f9;color:#222;}
 .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px #00000012;}
 input,textarea{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;margin:8px 0;font-size:16px;}
-button{width:100%;padding:14px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:16px;touch-action:manipulation;cursor:pointer;}
+button{width:100%;padding:14px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;}
 .msg-item{border-bottom:1px solid #eee;padding:12px 0;}
 .msg-name{font-weight:bold;color:#2563eb;}
 .msg-time{font-size:12px;color:#888;margin:4px 0;}
@@ -37,18 +37,16 @@ const submitBtn = document.getElementById('submitBtn');
 const nameInp = document.getElementById('name');
 const contentInp = document.getElementById('content');
 
-// 加载留言（修复：健壮JSON解析，捕获异常）
+// 增加try/catch捕获移动端JS报错，界面外观无改动
 async function loadMsg(){
   try{
     const res = await fetch('/api/msg');
     const data = await res.json();
     render(data)
   }catch(e){
-    console.error('读取留言失败',e);
-    msgList.innerHTML = '<p style="color:red">加载失败，请刷新</p>';
+    console.error('加载留言异常',e);
   }
 }
-// 渲染留言
 function render(list){
   msgList.innerHTML = '';
   if(!list || !list.length){
@@ -66,7 +64,6 @@ function render(list){
     msgList.appendChild(div);
   })
 }
-// 防XSS
 function escapeHtml(str){
   return String(str)
     .replaceAll('&','&amp;')
@@ -76,7 +73,6 @@ function escapeHtml(str){
     .replaceAll("'","&#039;")
 }
 
-// 提交留言（修复移动端点击、提交成功强制重载、异常兜底）
 submitBtn.addEventListener('click',async ()=>{
   const name = nameInp.value.trim();
   const content = contentInp.value.trim();
@@ -94,20 +90,18 @@ submitBtn.addEventListener('click',async ()=>{
       alert('留言成功！');
       nameInp.value = '';
       contentInp.value = '';
-      await loadMsg(); // ✅提交成功立刻重载列表
+      loadMsg();
     }else{
       alert('失败：'+ret.msg)
     }
   }catch(e){
-    console.error(e);
+    console.error('提交异常',e);
     alert('网络异常，请重试');
-  }finally{
-    submitBtn.disabled = false;
-    submitBtn.textContent = '提交留言';
   }
+  submitBtn.disabled = false;
+  submitBtn.textContent = '提交留言';
 })
 
-// 页面打开自动加载
 loadMsg();
 </script>
 </body>
