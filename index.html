@@ -2,7 +2,6 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<!-- 只新增这一行移动端适配，视觉完全无变化 -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>云端留言板</title>
 <meta name="msvalidate.01" content="5375C1040004CDBEFCF73F7C9133AD5E" />
@@ -37,7 +36,6 @@ const submitBtn = document.getElementById('submitBtn');
 const nameInp = document.getElementById('name');
 const contentInp = document.getElementById('content');
 
-// 增加try/catch捕获移动端JS报错，界面外观无改动
 async function loadMsg(){
   try{
     const res = await fetch('/api/msg');
