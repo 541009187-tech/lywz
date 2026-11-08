@@ -1,14 +1,18 @@
 /**
  * 留言墙 · Cloudflare Pages 动态后台（Pages Functions）
- * 路由：/api/messages、/api/messages/:id/like、/api/messages/:id、/api/admin/*
+ * 路由：/api/messages、/api/messages/:id/like、/api/messages/:id
+ *       /api/messages/:id/replies、/api/messages/:id/replies/:rid
+ *       /api/admin/login、/api/admin/logout、/api/admin/check
  * 存储：复用仓库里已有的 KV 绑定 MSG_KV（不用 SQL 数据库）
  */
 
 const NOTE_COLORS = new Set(["yellow", "pink", "blue", "green", "lilac"]);
 const MAX_NAME = 12;
 const MAX_CONTENT = 200;
+const MAX_REPLY = 120;
 const MAX_BODY = 8 * 1024;
 const MAX_KEEP = 3000;
+const MAX_REPLIES = 30;
 const KEY = "wall:messages";
 
 /* 管理员 */
@@ -48,7 +52,17 @@ async function readJson(request) {
   }
 }
 
+function publicReply(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    content: r.content,
+    created_ms: r.created_ms,
+  };
+}
+
 function publicMessage(m, cid) {
+  const replies = Array.isArray(m.replies) ? m.replies : [];
   return {
     id: m.id,
     name: m.name,
@@ -57,6 +71,8 @@ function publicMessage(m, cid) {
     created_ms: m.created_ms,
     likes: m.likes || 0,
     liked: cid ? (m.likedBy || []).includes(cid) : false,
+    replies: replies.map(publicReply),
+    reply_total: replies.length,
   };
 }
 
@@ -175,6 +191,7 @@ async function createMessage(request, env) {
     delete_token: crypto.randomUUID().replace(/-/g, ""),
     likes: 0,
     likedBy: [],
+    replies: [],
   };
 
   list.push(msg);
@@ -210,7 +227,64 @@ async function likeMessage(request, env, id) {
   return json({ ok: true, likes: msg.likes || 0, liked: true, already: already });
 }
 
-/* ---------------- 撤下 ---------------- */
+/* ---------------- 回复 ---------------- */
+async function createReply(request, env, id) {
+  const body = await readJson(request);
+  const name = cleanText(body.name, MAX_NAME) || "匿名访客";
+  const content = cleanText(body.content, MAX_REPLY);
+
+  if (!content) return json({ ok: false, error: "回复内容不能为空" }, 400);
+
+  const list = await loadAll(env);
+  const msg = list.filter(function (m) { return m.id === id; })[0];
+  if (!msg) return json({ ok: false, error: "这条留言已经不在了" }, 404);
+
+  msg.replies = Array.isArray(msg.replies) ? msg.replies : [];
+  if (msg.replies.length >= MAX_REPLIES) {
+    return json({ ok: false, error: "这条留言的回复已经满了" }, 400);
+  }
+
+  let rid = Date.now();
+  while (msg.replies.some(function (r) { return r.id === rid; })) rid += 1;
+
+  const reply = {
+    id: rid,
+    name: name,
+    content: content,
+    created_ms: Date.now(),
+    delete_token: crypto.randomUUID().replace(/-/g, ""),
+  };
+
+  msg.replies.push(reply);
+  await saveAll(env, list);
+
+  return json({ ok: true, token: reply.delete_token, reply: publicReply(reply), reply_total: msg.replies.length }, 201);
+}
+
+async function deleteReply(request, env, id, rid) {
+  const admin = await adminTokenValid(request, env);
+  const token = (request.headers.get("X-Delete-Token") || "").trim();
+  if (!admin && !token) return json({ ok: false, error: "缺少撤下凭证" }, 400);
+
+  const list = await loadAll(env);
+  const msg = list.filter(function (m) { return m.id === id; })[0];
+  if (!msg) return json({ ok: false, error: "这条留言已经不在了" }, 404);
+
+  const replies = Array.isArray(msg.replies) ? msg.replies : [];
+  const index = replies.findIndex(function (r) { return r.id === rid; });
+  if (index < 0) return json({ ok: false, error: "这条回复已经不在了" }, 404);
+  if (!admin && replies[index].delete_token !== token) {
+    return json({ ok: false, error: "只有写这条回复的人才能删" }, 403);
+  }
+
+  replies.splice(index, 1);
+  msg.replies = replies;
+  await saveAll(env, list);
+
+  return json({ ok: true, reply_total: replies.length });
+}
+
+/* ---------------- 撤下留言 ---------------- */
 async function deleteMessage(request, env, id) {
   const admin = await adminTokenValid(request, env);
   const token = (request.headers.get("X-Delete-Token") || "").trim();
@@ -259,6 +333,18 @@ export async function onRequest(context) {
 
     if (path === "/api/admin/check") {
       if (method === "GET") return adminCheck(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    const replies = path.match(/^\/api\/messages\/(\d+)\/replies$/);
+    if (replies) {
+      if (method === "POST") return createReply(request, env, Number(replies[1]));
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    const replyDel = path.match(/^\/api\/messages\/(\d+)\/replies\/(\d+)$/);
+    if (replyDel) {
+      if (method === "DELETE") return deleteReply(request, env, Number(replyDel[1]), Number(replyDel[2]));
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
