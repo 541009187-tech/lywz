@@ -5,7 +5,7 @@
     yellow: 'note--yellow', pink: 'note--pink', blue: 'note--blue',
     green: 'note--green', lilac: 'note--lilac'
   };
-  var state = { order: 'new', q: '', offset: 0, limit: 9, total: 0, items: [], clock: 0, loading: false };
+  var state = { order: 'new', q: '', offset: 0, limit: 9, total: 0, items: [], clock: 0, loading: false, admin: '' };
   var freshIds = new Set();
 
   var notesEl = document.getElementById('notes');
@@ -21,14 +21,17 @@
   var submitBtn = document.getElementById('submitBtn');
   var searchInput = document.getElementById('search');
   var toastEl = document.getElementById('toast');
+  var wallBar = document.querySelector('.wall-bar');
+  var adminBtn = document.getElementById('adminBtn');
 
   var CLIENT_ID = getClientId();
+  state.admin = readAdminToken();
 
   if (location.protocol === 'file:') {
     document.getElementById('fileWarn').hidden = false;
   }
 
-  /* ---------------- 本地存的访客标识和撤下凭证 ---------------- */
+  /* ---------------- 本地存的访客标识、撤下凭证、管理员凭证 ---------------- */
   function getClientId() {
     var id = '';
     try { id = localStorage.getItem('wall_client_id') || ''; } catch (e) {}
@@ -47,6 +50,18 @@
 
   function writeTokens(t) {
     try { localStorage.setItem('wall_tokens', JSON.stringify(t)); } catch (e) {}
+  }
+
+  function readAdminToken() {
+    try { return localStorage.getItem('wall_admin_token') || ''; } catch (e) { return ''; }
+  }
+
+  function saveAdminToken(token) {
+    state.admin = token || '';
+    try {
+      if (token) localStorage.setItem('wall_admin_token', token);
+      else localStorage.removeItem('wall_admin_token');
+    } catch (e) {}
   }
 
   /* ---------------- 小工具 ---------------- */
@@ -108,6 +123,7 @@
     el.className = 'note ' + (NOTE_CLASS[m.color] || NOTE_CLASS.yellow);
     el.style.setProperty('--rot', rot.toFixed(2) + 'deg');
     el.dataset.id = String(m.id);
+    if (state.admin) el.classList.add('is-admin');
 
     var pin = document.createElement('span');
     pin.className = 'pin';
@@ -144,11 +160,11 @@
     foot.appendChild(like);
 
     var tokens = readTokens();
-    if (tokens[m.id]) {
+    if (tokens[m.id] || state.admin) {
       var del = document.createElement('button');
       del.type = 'button';
       del.className = 'take-down';
-      del.textContent = '撤下';
+      del.textContent = (state.admin && !tokens[m.id]) ? '管理员撤下' : '撤下';
       del.addEventListener('click', function () { removeMessage(m.id); });
       foot.appendChild(del);
     }
@@ -283,23 +299,156 @@
   /* ---------------- 撤下 ---------------- */
   function removeMessage(id) {
     var tokens = readTokens();
-    if (!tokens[id]) return;
+    if (!tokens[id] && !state.admin) return;
     if (!window.confirm('确定把这条留言从墙上撤下吗？撤下就找不回来了。')) return;
 
-    api('/api/messages/' + id, {
-      method: 'DELETE',
-      headers: { 'X-Delete-Token': tokens[id] }
+    var headers = {};
+    if (tokens[id]) headers['X-Delete-Token'] = tokens[id];
+    if (state.admin) headers['X-Admin-Token'] = state.admin;
+
+    api('/api/messages/' + id, { method: 'DELETE', headers: headers })
+      .then(function (data) {
+        if (tokens[id]) { delete tokens[id]; writeTokens(tokens); }
+        state.items = state.items.filter(function (m) { return m.id !== id; });
+        state.total = (data.total !== undefined) ? data.total : Math.max(0, state.total - 1);
+        render();
+        toast('已经从墙上撤下');
+      }).catch(function (err) {
+        toast(err.message);
+      });
+  }
+
+  /* ---------------- 管理员 ---------------- */
+  function updateAdminUI() {
+    var old = document.querySelector('.admin-bar');
+    if (old) old.remove();
+
+    if (!state.admin) {
+      if (adminBtn) adminBtn.textContent = '管理员';
+      return;
+    }
+    if (adminBtn) adminBtn.textContent = '管理员模式';
+
+    var bar = document.createElement('div');
+    bar.className = 'admin-bar';
+    var tag = document.createElement('span');
+    tag.textContent = '管理员模式：可以撤下任何一条留言';
+    var out = document.createElement('button');
+    out.type = 'button';
+    out.className = 'admin-out';
+    out.textContent = '退出管理';
+    out.addEventListener('click', function () { exitAdmin(false); });
+    bar.appendChild(tag);
+    bar.appendChild(out);
+    wallBar.parentNode.insertBefore(bar, wallBar.nextSibling);
+  }
+
+  function exitAdmin(silent) {
+    var token = state.admin;
+    saveAdminToken('');
+    updateAdminUI();
+    render();
+    if (!token) return;
+    api('/api/admin/logout', { method: 'POST', headers: { 'X-Admin-Token': token } })
+      .catch(function () {});
+    if (!silent) toast('已退出管理员模式');
+  }
+
+  var modal = null;
+
+  function buildModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'adminModal';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="adminTitle">',
+      '  <h3 id="adminTitle">管理员登录</h3>',
+      '  <label class="mfield"><span>名字</span><input id="adminName" type="text" maxlength="12" autocomplete="username" placeholder="管理员"></label>',
+      '  <label class="mfield"><span>密码</span><input id="adminPass" type="password" maxlength="32" autocomplete="current-password" placeholder="默认 123456"></label>',
+      '  <p class="modal-hint">名字要填「管理员」，只有管理员能撤下别人的留言。</p>',
+      '  <div class="modal-actions">',
+      '    <button type="button" class="ghost" id="adminCancel">取消</button>',
+      '    <button type="button" class="solid" id="adminOk">进入</button>',
+      '  </div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) closeModal(); });
+    wrap.querySelector('#adminCancel').addEventListener('click', closeModal);
+    wrap.querySelector('#adminOk').addEventListener('click', submitAdmin);
+    wrap.querySelector('#adminName').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submitAdmin(); }
+    });
+    wrap.querySelector('#adminPass').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submitAdmin(); }
+    });
+    return wrap;
+  }
+
+  function openModal() {
+    if (!modal) modal = buildModal();
+    modal.hidden = false;
+    var nameEl = modal.querySelector('#adminName');
+    var passEl = modal.querySelector('#adminPass');
+    if (!nameEl.value) nameEl.value = '管理员';
+    passEl.value = '';
+    setTimeout(function () { passEl.focus(); }, 30);
+  }
+
+  function closeModal() {
+    if (modal) modal.hidden = true;
+  }
+
+  function submitAdmin() {
+    var nameEl = modal.querySelector('#adminName');
+    var passEl = modal.querySelector('#adminPass');
+    var okBtn = modal.querySelector('#adminOk');
+    var name = nameEl.value.trim();
+    var password = passEl.value;
+
+    if (!name) { toast('名字要填「管理员」'); nameEl.focus(); return; }
+    if (!password) { toast('请输入密码'); passEl.focus(); return; }
+
+    okBtn.disabled = true;
+    api('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, password: password })
     }).then(function (data) {
-      delete tokens[id];
-      writeTokens(tokens);
-      state.items = state.items.filter(function (m) { return m.id !== id; });
-      state.total = (data.total !== undefined) ? data.total : Math.max(0, state.total - 1);
+      saveAdminToken(data.token);
+      closeModal();
+      updateAdminUI();
       render();
-      toast('已经从墙上撤下');
+      toast('管理员模式已开启');
     }).catch(function (err) {
-      toast(err.message);
+      toast(err.message || '进不去');
+    }).then(function () {
+      okBtn.disabled = false;
     });
   }
+
+  if (adminBtn) {
+    adminBtn.addEventListener('click', function () {
+      if (state.admin) { exitAdmin(false); return; }
+      openModal();
+    });
+  }
+
+  /* 如果本地存着凭证，先静默确认它还有效 */
+  if (state.admin) {
+    api('/api/admin/check', { method: 'GET', headers: { 'X-Admin-Token': state.admin } })
+      .then(function (data) {
+        if (!data.admin) saveAdminToken('');
+        updateAdminUI();
+      }).catch(function () {
+        saveAdminToken('');
+        updateAdminUI();
+      });
+  }
+
+  updateAdminUI();
 
   /* ---------------- 排序、搜索、翻页 ---------------- */
   document.querySelectorAll('.tab').forEach(function (tab) {
