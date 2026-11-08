@@ -7,6 +7,7 @@
   };
   var state = { order: 'new', q: '', offset: 0, limit: 9, total: 0, items: [], clock: 0, loading: false, admin: '' };
   var freshIds = new Set();
+  var bannedNames = [];
 
   var notesEl = document.getElementById('notes');
   var totalEl = document.getElementById('total');
@@ -52,6 +53,17 @@
     try { localStorage.setItem('wall_tokens', JSON.stringify(t)); } catch (e) {}
   }
 
+  function readUsedName() {
+    try { return localStorage.getItem('wall_name') || ''; } catch (e) { return ''; }
+  }
+
+  function saveUsedName(n) {
+    try {
+      if (n) localStorage.setItem('wall_name', n);
+      else localStorage.removeItem('wall_name');
+    } catch (e) {}
+  }
+
   function readAdminToken() {
     try { return localStorage.getItem('wall_admin_token') || ''; } catch (e) { return ''; }
   }
@@ -70,7 +82,7 @@
     toastEl.textContent = msg;
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2800);
   }
 
   function api(path, options) {
@@ -98,6 +110,52 @@
 
   function nickName() {
     return (nameInput.value || '').trim() || '匿名访客';
+  }
+
+  /* ---------------- 禁用名字 ---------------- */
+  function normName(v) {
+    return String(v || '').replace(/[\u3000\s]+/g, ' ').trim().toLowerCase();
+  }
+
+  function isBannedName(name) {
+    var t = normName(name);
+    if (!t) return false;
+    return bannedNames.some(function (b) { return normName(b) === t; });
+  }
+
+  function loadBannedNames() {
+    return api('/api/banned').then(function (data) {
+      bannedNames = Array.isArray(data.names) ? data.names : [];
+      return bannedNames;
+    }).catch(function () {
+      bannedNames = [];
+      return bannedNames;
+    });
+  }
+
+  /* 通用提示弹层 */
+  function showNotice(titleText, lines) {
+    var wrap = document.getElementById('noticeModal');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'modal';
+      wrap.id = 'noticeModal';
+      wrap.hidden = true;
+      wrap.innerHTML = [
+        '<div class="modal-card" role="dialog" aria-modal="true">',
+        '  <h3 id="noticeTitle"></h3>',
+        '  <p class="notice-text" id="noticeLine1"></p>',
+        '  <p class="notice-text" id="noticeLine2"></p>',
+        '  <div class="modal-actions"><button type="button" class="solid" id="noticeOk">我知道了</button></div>',
+        '</div>'
+      ].join('');
+      document.body.appendChild(wrap);
+      wrap.querySelector('#noticeOk').addEventListener('click', function () { wrap.hidden = true; });
+    }
+    wrap.querySelector('#noticeTitle').textContent = titleText;
+    wrap.querySelector('#noticeLine1').textContent = lines[0] || '';
+    wrap.querySelector('#noticeLine2').textContent = lines[1] || '';
+    wrap.hidden = false;
   }
 
   /* ---------------- 渲染 ---------------- */
@@ -281,16 +339,23 @@
 
     send.addEventListener('click', function () {
       var text = input.value.trim();
+      var who = nickName();
       if (!text) { toast('还没写内容'); input.focus(); return; }
+      if (isBannedName(who)) {
+        toast('该名字已被禁用，请更换名字');
+        nameInput.focus();
+        return;
+      }
       send.disabled = true;
       api('/api/messages/' + m.id + '/replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nickName(), content: text, client_id: CLIENT_ID })
+        body: JSON.stringify({ name: who, content: text, client_id: CLIENT_ID })
       }).then(function (data) {
         m.replies = Array.isArray(m.replies) ? m.replies : [];
         m.replies.push(data.reply);
         m.reply_total = data.reply_total;
+        saveUsedName(nameInput.value.trim());
 
         var tokens = readTokens();
         tokens['r' + data.reply.id] = data.token;
@@ -374,6 +439,14 @@
       contentInput.focus();
       return;
     }
+
+    var usedName = nameInput.value.trim();
+    if (isBannedName(usedName || '匿名访客')) {
+      toast('该名字已被禁用，请更换名字');
+      nameInput.focus();
+      return;
+    }
+
     var colorInput = form.querySelector('input[name="color"]:checked');
     var color = colorInput ? colorInput.value : 'yellow';
 
@@ -382,7 +455,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: nameInput.value.trim(),
+        name: usedName,
         content: content,
         color: color,
         client_id: CLIENT_ID
@@ -391,6 +464,7 @@
       var tokens = readTokens();
       tokens[data.message.id] = data.token;
       writeTokens(tokens);
+      saveUsedName(usedName);
 
       contentInput.value = '';
       counterEl.textContent = '0';
@@ -414,6 +488,10 @@
       notesEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(function (err) {
       toast(err.message || '没贴上，后台可能没开');
+      if (err.message && err.message.indexOf('已被禁用') >= 0) {
+        nameInput.focus();
+        loadBannedNames();
+      }
     }).then(function () {
       submitBtn.disabled = false;
       contentInput.focus();
@@ -488,14 +566,28 @@
     var bar = document.createElement('div');
     bar.className = 'admin-bar';
     var tag = document.createElement('span');
-    tag.textContent = '管理员模式：可以撤下任何留言和回复';
+    tag.textContent = '管理员模式：可以撤下留言、回复，也可以禁用名字';
+
+    var actions = document.createElement('div');
+    actions.className = 'admin-actions';
+
+    var banBtn = document.createElement('button');
+    banBtn.type = 'button';
+    banBtn.className = 'admin-out';
+    banBtn.textContent = '禁用名字';
+    banBtn.addEventListener('click', openBanModal);
+
     var out = document.createElement('button');
     out.type = 'button';
     out.className = 'admin-out';
     out.textContent = '退出管理';
     out.addEventListener('click', function () { exitAdmin(false); });
+
+    actions.appendChild(banBtn);
+    actions.appendChild(out);
+
     bar.appendChild(tag);
-    bar.appendChild(out);
+    bar.appendChild(actions);
     wallBar.parentNode.insertBefore(bar, wallBar.nextSibling);
   }
 
@@ -504,6 +596,7 @@
     saveAdminToken('');
     updateAdminUI();
     render();
+    if (banModal) banModal.hidden = true;
     if (!token) return;
     api('/api/admin/logout', { method: 'POST', headers: { 'X-Admin-Token': token } })
       .catch(function () {});
@@ -577,6 +670,7 @@
       updateAdminUI();
       render();
       toast('管理员模式已开启');
+      loadBannedNames();
     }).catch(function (err) {
       toast(err.message || '进不去');
     }).then(function () {
@@ -591,19 +685,121 @@
     });
   }
 
-  /* 如果本地存着凭证，先静默确认它还有效 */
-  if (state.admin) {
-    api('/api/admin/check', { method: 'GET', headers: { 'X-Admin-Token': state.admin } })
+  /* ---------------- 禁用名字管理 ---------------- */
+  var banModal = null;
+
+  function buildBanModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'banModal';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="banTitle">',
+      '  <h3 id="banTitle">禁用名字</h3>',
+      '  <p class="ban-hint">禁用之后这个名字就不能再用来发帖或回复（不分大小写），它以前发的留言和回复会一起清掉。</p>',
+      '  <div class="ban-input-row">',
+      '    <input id="banInput" type="text" maxlength="12" placeholder="要禁用的名字，例如 sb">',
+      '    <button type="button" class="solid" id="banAdd">禁用</button>',
+      '  </div>',
+      '  <div class="ban-list" id="banList"></div>',
+      '  <div class="modal-actions"><button type="button" class="ghost" id="banClose">关闭</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.hidden = true; });
+    wrap.querySelector('#banClose').addEventListener('click', function () { wrap.hidden = true; });
+    wrap.querySelector('#banAdd').addEventListener('click', addBan);
+    wrap.querySelector('#banInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); addBan(); }
+    });
+    return wrap;
+  }
+
+  function openBanModal() {
+    if (!banModal) banModal = buildBanModal();
+    banModal.hidden = false;
+    refreshBanList();
+  }
+
+  function refreshBanList() {
+    if (!state.admin) return;
+    api('/api/admin/banned', { method: 'GET', headers: { 'X-Admin-Token': state.admin } })
       .then(function (data) {
-        if (!data.admin) saveAdminToken('');
-        updateAdminUI();
-      }).catch(function () {
-        saveAdminToken('');
-        updateAdminUI();
+        bannedNames = Array.isArray(data.names) ? data.names : [];
+        renderBanList(bannedNames);
+      }).catch(function (err) {
+        renderBanList([]);
+        toast(err.message);
       });
   }
 
-  updateAdminUI();
+  function renderBanList(names) {
+    var box = banModal.querySelector('#banList');
+    box.textContent = '';
+    if (!names.length) {
+      var empty = document.createElement('p');
+      empty.className = 'ban-empty';
+      empty.textContent = '还没有禁用任何名字。';
+      box.appendChild(empty);
+      return;
+    }
+    names.forEach(function (n) {
+      var row = document.createElement('div');
+      row.className = 'ban-row';
+      var span = document.createElement('span');
+      span.className = 'ban-name';
+      span.textContent = n;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ban-del';
+      btn.textContent = '解除';
+      btn.addEventListener('click', function () { removeBan(n, btn); });
+      row.appendChild(span);
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  function addBan() {
+    var input = banModal.querySelector('#banInput');
+    var addBtn = banModal.querySelector('#banAdd');
+    var name = input.value.trim();
+    if (!name) { toast('先写要禁用的名字'); input.focus(); return; }
+
+    addBtn.disabled = true;
+    api('/api/admin/banned', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.admin },
+      body: JSON.stringify({ name: name })
+    }).then(function (data) {
+      bannedNames = Array.isArray(data.names) ? data.names : [];
+      renderBanList(bannedNames);
+      input.value = '';
+      toast('已禁用「' + name + '」，清掉留言 ' + data.removed_messages + ' 条、回复 ' + data.removed_replies + ' 条');
+      load(true);
+    }).catch(function (err) {
+      toast(err.message);
+    }).then(function () {
+      addBtn.disabled = false;
+    });
+  }
+
+  function removeBan(name, btn) {
+    btn.disabled = true;
+    api('/api/admin/banned', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.admin },
+      body: JSON.stringify({ name: name })
+    }).then(function (data) {
+      bannedNames = Array.isArray(data.names) ? data.names : [];
+      renderBanList(bannedNames);
+      toast('「' + name + '」已经解除禁用');
+    }).catch(function (err) {
+      toast(err.message);
+      btn.disabled = false;
+    });
+  }
 
   /* ---------------- 排序、搜索、翻页 ---------------- */
   document.querySelectorAll('.tab').forEach(function (tab) {
@@ -639,6 +835,37 @@
   setInterval(function () {
     if (!state.loading && state.items.length) render();
   }, 60000);
+
+  /* 如果本地存着凭证，先静默确认它还有效 */
+  if (state.admin) {
+    api('/api/admin/check', { method: 'GET', headers: { 'X-Admin-Token': state.admin } })
+      .then(function (data) {
+        if (!data.admin) saveAdminToken('');
+        updateAdminUI();
+      }).catch(function () {
+        saveAdminToken('');
+        updateAdminUI();
+      });
+  }
+
+  updateAdminUI();
+
+  /* 打开页面先拿禁用名单：用过被禁名字的人会看到提示 */
+  loadBannedNames().then(function () {
+    var used = readUsedName();
+    if (used && isBannedName(used)) {
+      showNotice('名字已被禁用', [
+        '你好，你使用的名称「' + used + '」已被禁用，请更换名称。',
+        '你的所有留言已经被删除，请重新发送。'
+      ]);
+      saveUsedName('');
+      writeTokens({});
+      nameInput.value = '';
+      if (state.admin) refreshBanList();
+    } else {
+      nameInput.value = nameInput.value || used;
+    }
+  });
 
   load(true);
 })();
