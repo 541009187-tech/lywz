@@ -1,0 +1,84 @@
+/* ================= 管理员 ================= */
+.foot-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.admin-entry{
+  padding:5px 10px;
+  background:rgba(255,255,255,.08);
+  color:#f1e2ca;
+  border:1px solid rgba(255,255,255,.22);
+  border-radius:2px;
+  font-size:11.5px;
+  letter-spacing:.04em;
+  cursor:pointer;
+  transition:background .15s,border-color .15s;
+}
+.admin-entry:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.4);}
+.admin-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;
+  margin:-6px 0 16px;
+  padding:9px 12px;
+  background:rgba(255,253,245,.94);
+  border:1px solid rgba(60,40,15,.28);
+  border-left:3px solid #2f5749;
+  border-radius:2px;
+  box-shadow:0 3px 6px -2px rgba(45,28,10,.28);
+  font-size:12.5px;
+  color:#3b2a17;
+}
+.admin-out{
+  padding:5px 12px;
+  background:none;
+  border:1px solid rgba(60,40,15,.35);
+  border-radius:2px;
+  color:#3b2a17;
+  font-size:12px;
+  cursor:pointer;
+}
+.admin-out:hover{background:#f2e9d8;}
+.note.is-admin .take-down{color:#8f3c30;}
+
+.modal{
+  position:fixed;inset:0;z-index:30;
+  display:flex;align-items:center;justify-content:center;
+  padding:18px;
+  background:rgba(30,20,10,.55);
+}
+.modal[hidden]{display:none;}
+.modal-card{
+  width:100%;max-width:340px;
+  padding:20px 18px 16px;
+  background:linear-gradient(178deg,#fdfaf1,#f6efe0);
+  border-radius:3px;
+  box-shadow:0 24px 40px -18px rgba(20,12,4,.6);
+}
+.modal-card h3{
+  margin:0 0 14px;
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:19px;
+  letter-spacing:.06em;
+  color:#33261a;
+}
+.mfield{display:block;margin-bottom:12px;}
+.mfield > span{display:block;font-size:12px;color:#6a5644;margin-bottom:4px;letter-spacing:.05em;}
+.mfield input{
+  width:100%;
+  font-family:inherit;font-size:16px;color:#2e2620;
+  background:transparent;border:0;border-bottom:1px dashed rgba(70,50,28,.4);
+  padding:5px 2px 6px;outline:none;
+}
+.mfield input:focus{border-bottom:1px solid #2f5749;}
+.modal-hint{margin:4px 0 14px;font-size:11.5px;color:#8a7358;line-height:1.6;}
+.modal-actions{display:flex;gap:8px;}
+.ghost{
+  flex:1;padding:10px 14px;
+  background:none;border:1px solid rgba(60,40,15,.35);
+  border-radius:2px;color:#3b2a17;font-size:14px;cursor:pointer;
+}
+.ghost:hover{background:#f2e9d8;}
+.solid{
+  flex:1;padding:10px 14px;
+  background:#2f5749;border:0;border-radius:2px;
+  color:#fdf9ee;font-size:14px;letter-spacing:.06em;cursor:pointer;
+}
+.solid:hover{background:#356354;}
+.solid[disabled]{opacity:.6;cursor:progress;}
