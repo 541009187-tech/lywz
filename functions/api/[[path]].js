@@ -2,7 +2,9 @@
  * 留言墙 · Cloudflare Pages 动态后台（Pages Functions）
  * 路由：/api/messages、/api/messages/:id/like、/api/messages/:id
  *       /api/messages/:id/replies、/api/messages/:id/replies/:rid
+ *       /api/banned（公开的禁用名字列表）
  *       /api/admin/login、/api/admin/logout、/api/admin/check
+ *       /api/admin/banned（管理禁用名字）
  * 存储：复用仓库里已有的 KV 绑定 MSG_KV（不用 SQL 数据库）
  */
 
@@ -14,6 +16,7 @@ const MAX_BODY = 8 * 1024;
 const MAX_KEEP = 3000;
 const MAX_REPLIES = 30;
 const KEY = "wall:messages";
+const BANNED_KEY = "wall:banned_names";
 
 /* 管理员。默认密码不写明文，只放 SHA-256；KV 里有 wall:admin_password 时以 KV 为准 */
 const ADMIN_NAME = "管理员";
@@ -52,6 +55,15 @@ async function readJson(request) {
   }
 }
 
+/* 名字比对：去空白、转小写，全角空格也吃掉 */
+function normName(value) {
+  if (typeof value !== "string") return "";
+  return Array.from(value).slice(0, MAX_NAME * 2).join("")
+    .replace(/[\u3000\s]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function publicReply(r) {
   return {
     id: r.id,
@@ -87,6 +99,96 @@ async function saveAll(env, list) {
     list = list.slice(list.length - MAX_KEEP);
   }
   await env.MSG_KV.put(KEY, JSON.stringify(list));
+}
+
+/* ---------------- 禁用名字 ---------------- */
+async function loadBanned(env) {
+  const raw = await env.MSG_KV.get(BANNED_KEY, "json");
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(function (n) { return typeof n === "string" && n.trim(); });
+}
+
+async function saveBanned(env, names) {
+  await env.MSG_KV.put(BANNED_KEY, JSON.stringify(names));
+}
+
+function isBannedName(name, banned) {
+  const target = normName(name);
+  if (!target) return false;
+  return banned.some(function (b) { return normName(b) === target; });
+}
+
+async function publicBannedList(env) {
+  return json({ ok: true, names: await loadBanned(env) });
+}
+
+async function adminBannedList(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能管理禁用名字" }, 403);
+  }
+  return json({ ok: true, names: await loadBanned(env) });
+}
+
+async function adminBannedAdd(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能管理禁用名字" }, 403);
+  }
+
+  const body = await readJson(request);
+  const name = cleanText(body.name, MAX_NAME);
+  if (!name) return json({ ok: false, error: "要禁用的名字不能为空" }, 400);
+
+  const banned = await loadBanned(env);
+  if (!isBannedName(name, banned)) {
+    banned.push(name);
+    await saveBanned(env, banned);
+  }
+
+  const target = normName(name);
+  const list = await loadAll(env);
+  const keep = [];
+  let removedMessages = 0;
+  let removedReplies = 0;
+
+  list.forEach(function (m) {
+    if (normName(m.name) === target) {
+      removedMessages += 1;
+      return;
+    }
+    const replies = Array.isArray(m.replies) ? m.replies : [];
+    m.replies = replies.filter(function (r) {
+      if (normName(r.name) === target) {
+        removedReplies += 1;
+        return false;
+      }
+      return true;
+    });
+    keep.push(m);
+  });
+
+  await saveAll(env, keep);
+
+  return json({
+    ok: true,
+    names: banned,
+    removed_messages: removedMessages,
+    removed_replies: removedReplies,
+    total: keep.length,
+  });
+}
+
+async function adminBannedRemove(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能管理禁用名字" }, 403);
+  }
+
+  const body = await readJson(request);
+  const name = cleanText(body.name, MAX_NAME);
+  if (!name) return json({ ok: false, error: "要解除的名字不能为空" }, 400);
+
+  const banned = (await loadBanned(env)).filter(function (n) { return normName(n) !== normName(name); });
+  await saveBanned(env, banned);
+  return json({ ok: true, names: banned });
 }
 
 /* ---------------- 管理员 ---------------- */
@@ -133,7 +235,7 @@ async function adminLogin(request, env) {
   return json({ ok: true, token: token, exp: now + ADMIN_TTL });
 }
 
-async function adminTokenValid(request, env) {
+async function adminTokenValidStrict(request, env) {
   const token = (request.headers.get("X-Admin-Token") || "").trim();
   if (!token) return false;
   const now = Date.now();
@@ -151,7 +253,7 @@ async function adminLogout(request, env) {
 }
 
 async function adminCheck(request, env) {
-  return json({ ok: true, admin: await adminTokenValid(request, env) });
+  return json({ ok: true, admin: await adminTokenValidStrict(request, env) });
 }
 
 /* ---------------- 读留言 ---------------- */
@@ -190,6 +292,10 @@ async function createMessage(request, env) {
   const color = NOTE_COLORS.has(body.color) ? body.color : "yellow";
 
   if (!content) return json({ ok: false, error: "留言内容不能为空" }, 400);
+
+  if (isBannedName(name, await loadBanned(env))) {
+    return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
+  }
 
   const list = await loadAll(env);
   let id = Date.now();
@@ -248,6 +354,10 @@ async function createReply(request, env, id) {
 
   if (!content) return json({ ok: false, error: "回复内容不能为空" }, 400);
 
+  if (isBannedName(name, await loadBanned(env))) {
+    return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
+  }
+
   const list = await loadAll(env);
   const msg = list.filter(function (m) { return m.id === id; })[0];
   if (!msg) return json({ ok: false, error: "这条留言已经不在了" }, 404);
@@ -275,7 +385,7 @@ async function createReply(request, env, id) {
 }
 
 async function deleteReply(request, env, id, rid) {
-  const admin = await adminTokenValid(request, env);
+  const admin = await adminTokenValidStrict(request, env);
   const token = (request.headers.get("X-Delete-Token") || "").trim();
   if (!admin && !token) return json({ ok: false, error: "缺少撤下凭证" }, 400);
 
@@ -299,7 +409,7 @@ async function deleteReply(request, env, id, rid) {
 
 /* ---------------- 撤下留言 ---------------- */
 async function deleteMessage(request, env, id) {
-  const admin = await adminTokenValid(request, env);
+  const admin = await adminTokenValidStrict(request, env);
   const token = (request.headers.get("X-Delete-Token") || "").trim();
   if (!admin && !token) return json({ ok: false, error: "缺少撤下凭证" }, 400);
 
@@ -334,6 +444,11 @@ export async function onRequest(context) {
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
+    if (path === "/api/banned") {
+      if (method === "GET") return publicBannedList(env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
     if (path === "/api/admin/login") {
       if (method === "POST") return adminLogin(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
@@ -346,6 +461,13 @@ export async function onRequest(context) {
 
     if (path === "/api/admin/check") {
       if (method === "GET") return adminCheck(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/banned") {
+      if (method === "GET") return adminBannedList(request, env);
+      if (method === "POST") return adminBannedAdd(request, env);
+      if (method === "DELETE") return adminBannedRemove(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
