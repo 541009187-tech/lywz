@@ -15,9 +15,9 @@ const MAX_KEEP = 3000;
 const MAX_REPLIES = 30;
 const KEY = "wall:messages";
 
-/* 管理员 */
+/* 管理员。默认密码不写明文，只放 SHA-256；KV 里有 wall:admin_password 时以 KV 为准 */
 const ADMIN_NAME = "管理员";
-const DEFAULT_ADMIN_PASSWORD = "123456";
+const DEFAULT_ADMIN_PASSWORD_HASH = "5a4416c0721e1a79f0ba2df7cd77ca0ffb2533acb144ec9a4e69d1211ec86a9a";
 const ADMIN_PASSWORD_KEY = "wall:admin_password";
 const ADMIN_TOKENS_KEY = "wall:admin_tokens";
 const ADMIN_TTL = 7 * 24 * 60 * 60 * 1000;
@@ -90,9 +90,16 @@ async function saveAll(env, list) {
 }
 
 /* ---------------- 管理员 ---------------- */
-async function getAdminPassword(env) {
+async function getSavedAdminPassword(env) {
   const saved = await env.MSG_KV.get(ADMIN_PASSWORD_KEY);
-  return typeof saved === "string" && saved.trim() ? saved.trim() : DEFAULT_ADMIN_PASSWORD;
+  return typeof saved === "string" ? saved.trim() : "";
+}
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(function (b) {
+    return b.toString(16).padStart(2, "0");
+  }).join("");
 }
 
 async function readAdminTokens(env) {
@@ -108,8 +115,14 @@ async function adminLogin(request, env) {
   if (name !== ADMIN_NAME) return json({ ok: false, error: "名字要填「管理员」" }, 401);
   if (!password) return json({ ok: false, error: "请输入密码" }, 400);
 
-  const expected = await getAdminPassword(env);
-  if (password !== expected) return json({ ok: false, error: "密码不对" }, 401);
+  const savedPassword = await getSavedAdminPassword(env);
+  if (savedPassword) {
+    if (password !== savedPassword) return json({ ok: false, error: "密码不对" }, 401);
+  } else {
+    if (await sha256Hex(password) !== DEFAULT_ADMIN_PASSWORD_HASH) {
+      return json({ ok: false, error: "密码不对" }, 401);
+    }
+  }
 
   const now = Date.now();
   const token = crypto.randomUUID().replace(/-/g, "");
