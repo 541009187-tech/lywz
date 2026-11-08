@@ -1,82 +1,500 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>云端留言板</title>
-  <meta name="description" content="免费在线云端留言板，访客可留言，管理员后台管理，支持自定义留言上限">
-  <meta name="robots" content="index,follow">
-  <link rel="canonical" href="https://lywz-esc.pages.dev/">
-  <!-- ========== 把必应msvalidate那行meta粘贴到这里 ========== -->
-  
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>留言墙</title>
+<meta name="description" content="一块可以随手贴便签的留言墙。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='7' width='24' height='22' rx='2' fill='%23fdf0bd'/%3E%3Ccircle cx='16' cy='9' r='2.6' fill='%23c8443a'/%3E%3C/svg%3E">
+<style>
+/* ================= 基础 ================= */
+:root{
+  --ink:#2e2620;
+  --ink-2:#6a5644;
+  --paper:#fbf6ea;
+  --note-y:#fbf0c1;
+  --note-p:#f8d6d4;
+  --note-b:#d1e1f3;
+  --note-g:#dcebc5;
+  --note-l:#e9dbf1;
+  --wood-hi:#8a6239;
+  --wood-lo:#452b15;
+  --cork-hi:#d9b579;
+  --cork-lo:#ac8144;
+  --accent:#2f5749;
+  --heart:#b23a33;
+  --shadow:rgba(46,30,12,.30);
+  --r:3px;
+}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0;
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  color:var(--ink);
+  background:#8e6b3d;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,p{margin:0;}
+button{font-family:inherit;}
+.sr{
+  position:absolute;width:1px;height:1px;overflow:hidden;
+  clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;
+}
+:focus-visible{outline:2px solid #1f4538;outline-offset:2px;}
+.kai{font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;}
 
+/* ================= 顶部木牌 ================= */
+.sign{
+  position:relative;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:16px 20px;
+  padding:26px 18px 22px;
+  color:#fdf7e9;
+  background:
+    repeating-linear-gradient(92deg, rgba(255,255,255,.05) 0 2px, rgba(0,0,0,.04) 2px 9px),
+    linear-gradient(180deg,#8f6640,#6a4726 46%,#44290f);
+  border-bottom:3px solid #2a1808;
+  box-shadow:0 10px 24px -8px rgba(28,16,5,.55);
+}
+.sign::before,.sign::after{
+  content:"";
+  position:absolute;top:14px;width:11px;height:11px;border-radius:50%;
+  background:radial-gradient(circle at 35% 32%,#fdf6e6 0 2px,#b9a888 3px,#6f5c43 100%);
+  box-shadow:0 1px 2px rgba(0,0,0,.5);
+}
+.sign::before{left:14px;}
+.sign::after{right:14px;}
+.sign-main h1{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:38px;
+  line-height:1.1;
+  letter-spacing:.12em;
+  text-shadow:0 2px 0 rgba(0,0,0,.35),0 6px 14px rgba(0,0,0,.22);
+}
+.sign-main p{
+  margin-top:8px;
+  font-size:13.5px;
+  color:#f1dfc4;
+  letter-spacing:.03em;
+  max-width:32ch;
+}
+.count-tag{
+  flex:none;
+  padding:8px 14px 7px;
+  background:var(--paper);
+  color:var(--ink);
+  font-size:12.5px;
+  border-radius:2px;
+  transform:rotate(-2deg);
+  box-shadow:0 6px 12px -4px rgba(0,0,0,.45);
+  position:relative;
+}
+.count-tag b{font-size:17px;margin:0 3px;}
+.count-tag::before{
+  content:"";position:absolute;top:-7px;left:50%;width:34px;height:11px;margin-left:-17px;
+  background:rgba(255,255,255,.28);
+  border-left:1px solid rgba(255,255,255,.45);
+  border-right:1px solid rgba(255,255,255,.45);
+  transform:rotate(-3deg);
+}
+
+/* ================= 软木板 ================= */
+.board{
+  position:relative;
+  display:grid;
+  grid-template-columns:1fr;
+  align-items:start;
+  gap:26px;
+  padding:22px 14px 60px;
+  background-color:var(--cork-hi);
+  background-image:
+    radial-gradient(circle at 4px 6px, rgba(72,45,16,.30) 0 1.3px, transparent 2px),
+    radial-gradient(circle at 12px 14px, rgba(255,248,228,.45) 0 1.2px, transparent 2px),
+    radial-gradient(circle at 8px 3px, rgba(58,36,12,.22) 0 1px, transparent 1.8px),
+    linear-gradient(165deg,#dcb981,#c69c5e 45%,#ab8044);
+  background-size:19px 19px,27px 27px,13px 13px,100% 100%;
+}
+.board::before{
+  content:"";
+  position:absolute;inset:0;
+  pointer-events:none;
+  box-shadow:inset 0 0 130px rgba(58,34,10,.34);
+}
+
+/* ================= 便签本体 ================= */
+.note{
+  position:relative;
+  padding:36px 18px 16px;
+  border-radius:var(--r);
+  transform:rotate(var(--rot,0deg));
+  box-shadow:0 12px 22px -9px var(--shadow),0 2px 3px rgba(40,25,10,.16);
+  transition:transform .18s ease,box-shadow .18s ease;
+}
+.note:hover{transform:rotate(0deg) translateY(-3px);box-shadow:0 20px 28px -12px var(--shadow),0 3px 5px rgba(40,25,10,.16);}
+.pin{
+  position:absolute;top:10px;left:50%;width:14px;height:14px;margin-left:-7px;
+  border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#fff8ee 0 2px,#e2604b 3px,#a52a20 72%);
+  box-shadow:0 3px 4px rgba(40,20,8,.45),inset -1px -1px 2px rgba(0,0,0,.3);
+}
+.note--yellow{background:linear-gradient(178deg,#fdf4ce,#f9e9a8);}
+.note--pink{background:linear-gradient(178deg,#fbe0de,#f5c9c7);}
+.note--blue{background:linear-gradient(178deg,#dbe8f7,#c4d9ef);}
+.note--green{background:linear-gradient(178deg,#e4f0cf,#d2e5b4);}
+.note--lilac{background:linear-gradient(178deg,#f0e4f8,#e2cfee);}
+
+/* ================= 写留言 ================= */
+.compose{
+  background:
+    repeating-linear-gradient(180deg,transparent 0 30px,rgba(80,60,35,.07) 30px 31px),
+    linear-gradient(178deg,#fdfaf1,#f6efe0);
+  padding-bottom:22px;
+  z-index:1;
+}
+.compose h2{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:21px;
+  letter-spacing:.06em;
+  margin-bottom:16px;
+}
+.field{display:block;margin-bottom:14px;}
+.field > span{
+  display:block;
+  font-size:12px;
+  color:var(--ink-2);
+  letter-spacing:.05em;
+  margin-bottom:5px;
+}
+.field input,.field textarea{
+  width:100%;
+  font-family:inherit;
+  font-size:16px;
+  color:var(--ink);
+  background:transparent;
+  border:0;
+  border-bottom:1px dashed rgba(70,50,28,.38);
+  border-radius:0;
+  padding:5px 2px 6px;
+  outline:none;
+  transition:border-color .15s;
+}
+.field input::placeholder,.field textarea::placeholder{color:#a08e78;font-size:13.5px;}
+.field input:focus,.field textarea:focus{
+  border-bottom:1px solid var(--accent);
+  box-shadow:0 1px 0 var(--accent);
+}
+.field textarea{
+  min-height:150px;
+  line-height:30px;
+  resize:vertical;
+  background-image:repeating-linear-gradient(180deg,transparent 0 29px,rgba(70,50,28,.16) 29px 30px);
+}
+.compose-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin:16px 0 18px;
+  flex-wrap:wrap;
+}
+.colors{display:flex;gap:2px;}
+.swatch{position:relative;display:inline-flex;padding:9px;border-radius:50%;cursor:pointer;}
+.swatch input{position:absolute;inset:0;opacity:0;cursor:pointer;margin:0;}
+.swatch .dot{
+  display:block;width:24px;height:24px;border-radius:50%;
+  box-shadow:inset 0 -3px 5px rgba(0,0,0,.13),0 1px 2px rgba(0,0,0,.12);
+  transition:outline-color .15s;
+  outline:2px solid transparent;outline-offset:2px;
+}
+.swatch:has(input:checked) .dot{outline-color:var(--ink);}
+.counter{font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.submit{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:13px 16px;
+  border:0;border-radius:3px;
+  background:var(--accent);
+  color:#fdf9ee;
+  font-size:16px;letter-spacing:.08em;
+  cursor:pointer;
+  box-shadow:0 4px 0 #1d3a30,0 9px 16px -8px rgba(18,30,22,.65);
+  transition:transform .12s ease,box-shadow .12s ease,background .15s;
+}
+.submit svg{width:15px;height:15px;}
+.submit:hover{background:#356354;}
+.submit:active{transform:translateY(3px);box-shadow:0 1px 0 #1d3a30,0 4px 8px -6px rgba(18,30,22,.6);}
+.submit[disabled]{opacity:.6;cursor:progress;transform:none;}
+.hint{
+  margin-top:11px;
+  font-size:11.5px;
+  color:#8a7358;
+  text-align:center;
+  letter-spacing:.02em;
+}
+
+/* ================= 留言墙 ================= */
+.wall{min-width:0;position:relative;z-index:1;}
+.wall-bar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:18px;
+}
+.tabs{display:flex;gap:8px;}
+.tab{
+  padding:7px 18px;
+  font-size:13.5px;
+  color:#3b2a18;
+  background:rgba(251,246,234,.92);
+  border:1px solid rgba(60,40,15,.28);
+  border-radius:2px;
+  cursor:pointer;
+  box-shadow:0 2px 3px rgba(45,28,10,.18);
+  transition:background .15s,color .15s;
+}
+.tab[aria-selected="true"]{background:var(--accent);color:#fdf9ee;border-color:#25453a;}
+.search{
+  display:flex;align-items:center;gap:7px;
+  padding:6px 11px;
+  background:rgba(251,246,234,.94);
+  border:1px solid rgba(60,40,15,.26);
+  border-radius:2px;
+  box-shadow:0 2px 3px rgba(45,28,10,.16);
+}
+.search svg{width:16px;height:16px;flex:none;stroke:#5c4a35;fill:none;stroke-width:2;}
+.search input{
+  width:132px;
+  border:0;background:transparent;outline:none;
+  font-family:inherit;font-size:16px;color:var(--ink);padding:4px 0;
+}
+.search input::placeholder{font-size:13px;color:#8a7861;}
+.search input:focus{width:170px;}
+
+.notes{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:18px 16px;
+  align-items:start;
+}
+.note-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px;}
+.who{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:16.5px;
+  letter-spacing:.04em;
+  color:#3a2c1e;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.when{flex:none;font-size:11px;color:#7d6a53;letter-spacing:.02em;}
+.said{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:17px;
+  line-height:30px;
+  color:#33291d;
+  white-space:pre-wrap;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  background-image:repeating-linear-gradient(180deg,transparent 0 29px,rgba(80,60,35,.13) 29px 30px);
+}
+.note-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;
+  margin-top:8px;
+  padding-top:7px;
+  border-top:1px dashed rgba(80,58,30,.22);
+}
+.like{
+  display:inline-flex;align-items:center;gap:5px;
+  min-height:36px;padding:4px 6px;
+  background:none;border:0;
+  font-size:13px;color:#7b5f43;
+  cursor:pointer;
+  transition:color .15s;
+}
+.like svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;}
+.like[aria-pressed="true"]{color:var(--heart);}
+.like[aria-pressed="true"] svg{fill:var(--heart);stroke:var(--heart);}
+.take-down{
+  background:none;border:0;padding:8px 4px;
+  font-size:11.5px;color:#7d6852;
+  text-decoration:underline;text-underline-offset:2px;
+  cursor:pointer;
+}
+.empty{
+  padding:40px 22px;
+  text-align:center;
+  color:#3b2a17;
+  background:rgba(251,246,234,.55);
+  border:2px dashed rgba(70,45,20,.42);
+  border-radius:3px;
+}
+.empty p{margin:0 auto 6px;max-width:30ch;}
+.empty .empty-title{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:20px;letter-spacing:.08em;
+}
+.empty p + p{font-size:13px;color:#5b4530;}
+.more{
+  display:block;
+  margin:26px auto 0;
+  padding:10px 24px;
+  background:rgba(251,246,234,.92);
+  border:1px solid rgba(60,40,15,.3);
+  border-radius:2px;
+  color:#33261a;
+  font-size:13.5px;
+  cursor:pointer;
+  box-shadow:0 3px 6px -2px rgba(45,28,10,.3);
+}
+.more:hover{background:#fffdf5;}
+#emptyBtn{margin-top:16px;}
+
+/* ================= 其他 ================= */
+.file-warn{
+  padding:11px 18px;
+  background:#402a14;
+  color:#ffe9c9;
+  font-size:13px;
+  line-height:1.7;
+  border-bottom:1px solid #2a1907;
+}
+.foot{
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;
+  padding:16px 18px 22px;
+  background:linear-gradient(180deg,#5a3c21,#3d2512);
+  color:#e9d8bd;
+  font-size:12px;
+  letter-spacing:.02em;
+}
+.toast{
+  position:fixed;left:50%;bottom:22px;
+  max-width:calc(100vw - 32px);
+  padding:11px 18px;
+  background:#2b231d;
+  color:#fdf7ea;
+  font-size:13.5px;
+  border-radius:3px;
+  box-shadow:0 12px 24px -10px rgba(0,0,0,.6);
+  opacity:0;
+  transform:translate(-50%,14px);
+  transition:opacity .22s ease,transform .22s ease;
+  pointer-events:none;
+  z-index:20;
+}
+.toast.show{opacity:1;transform:translate(-50%,0);}
+
+@keyframes paste{
+  0%{opacity:0;transform:rotate(var(--rot,0deg)) translateY(-20px) scale(1.08);}
+  60%{opacity:1;}
+  100%{opacity:1;transform:rotate(var(--rot,0deg)) translateY(0) scale(1);}
+}
+.note.fresh{animation:paste .45s cubic-bezier(.18,.9,.3,1.15) both;}
+
+/* ---------- 中屏 ---------- */
+@media (min-width:620px){
+  .sign{padding:30px 26px 24px;}
+  .sign-main h1{font-size:46px;}
+  .board{padding:26px 22px 64px;gap:30px;}
+  .notes{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 18px;}
+  .foot{padding:16px 26px 24px;}
+}
+/* ---------- 宽屏 ---------- */
+@media (min-width:980px){
+  .board{grid-template-columns:340px minmax(0,1fr);padding:32px clamp(20px,3.4vw,48px) 72px;gap:clamp(24px,3vw,42px);}
+  .compose-wrap{position:sticky;top:24px;}
+  .notes{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media (min-width:1220px){
+  .notes{grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 20px;}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;}
+  .note{transform:none;}
+}
+</style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h2 style="text-align:center;margin-bottom:16px">留言板</h2>
-    <input type="text" id="nick" placeholder="你的昵称">
-    <textarea id="content" rows="4" placeholder="写下留言..."></textarea>
-    <button onclick="sendMsg()">提交留言</button>
-  </div>
-  <div class="card">
-    <h3 style="margin-bottom:12px">留言列表</h3>
-    <div id="listBox"></div>
-  </div>
+
+<div id="fileWarn" class="file-warn" hidden>
+  这个页面要在 Cloudflare 的网址上打开才能留言：直接双击本地文件的话，后台连不上。
 </div>
-<style>
-    * {box-sizing: border-box;margin:0;padding:0;font-family:Microsoft YaHei}
-    body{background:#f1f5f9;padding:20px}
-    .wrap{max-width:600px;margin:0 auto}
-    .card{background:#fff;border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 2px 10px #00000008}
-    input,textarea{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:12px;font-size:16px;margin-bottom:12px}
-    button{width:100%;padding:13px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-size:16px;cursor:pointer}
-    .msg-item{border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:10px}
-    .msg-nick{font-weight:bold;color:#2563eb}
-    .msg-time{font-size:12px;color:#64748b}
-    .msg-text{margin-top:6px;line-height:1.6}
-</style>
+
+<header class="sign">
+  <div class="sign-main">
+    <h1>留言墙</h1>
+    <p>有什么想说的，写下来，贴上去。</p>
+  </div>
+  <div class="count-tag"><b id="total">0</b>条留言贴在墙上</div>
+</header>
+
+<main class="board">
+  <div class="compose-wrap">
+    <form id="composer" class="note compose" novalidate>
+      <span class="pin" aria-hidden="true"></span>
+      <h2>写一条留言</h2>
+
+      <label class="field">
+        <span>你的名字</span>
+        <input id="name" name="name" type="text" maxlength="12" autocomplete="nickname" placeholder="不填就叫匿名访客">
+      </label>
+
+      <label class="field">
+        <span>想说的话</span>
+        <textarea id="content" name="content" maxlength="200" rows="5" placeholder="随便写，别太客气。"></textarea>
+      </label>
+
+      <div class="compose-row">
+        <div class="colors" role="radiogroup" aria-label="便签颜色">
+          <label class="swatch"><input type="radio" name="color" value="yellow" checked><span class="dot" style="background:#f5e79f"></span><span class="sr">黄色便签</span></label>
+          <label class="swatch"><input type="radio" name="color" value="pink"><span class="dot" style="background:#f3c3c0"></span><span class="sr">粉色便签</span></label>
+          <label class="swatch"><input type="radio" name="color" value="blue"><span class="dot" style="background:#bed6ee"></span><span class="sr">蓝色便签</span></label>
+          <label class="swatch"><input type="radio" name="color" value="green"><span class="dot" style="background:#cfe4ad"></span><span class="sr">绿色便签</span></label>
+          <label class="swatch"><input type="radio" name="color" value="lilac"><span class="dot" style="background:#ddc7eb"></span><span class="sr">紫色便签</span></label>
+        </div>
+        <span class="counter"><span id="counter">0</span>/200</span>
+      </div>
+
+      <button class="submit" type="submit" id="submitBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13M12 16l-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        贴上墙
+      </button>
+      <p class="hint">按 Ctrl + Enter 也能贴上</p>
+    </form>
+  </div>
+
+  <section class="wall" aria-label="墙上的留言">
+    <div class="wall-bar">
+      <div class="tabs" role="tablist" aria-label="留言排序">
+        <button class="tab" type="button" role="tab" data-order="new" aria-selected="true">最新</button>
+        <button class="tab" type="button" role="tab" data-order="old" aria-selected="false">最早</button>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L20 20"/></svg>
+        <input id="search" type="search" maxlength="40" placeholder="搜一搜墙上的话" aria-label="搜索留言">
+      </label>
+    </div>
+
+    <div id="notes" class="notes"></div>
+
+    <div id="empty" class="empty" hidden>
+      <p class="empty-title">墙上还空着</p>
+      <p>写下第一条留言，让这里有点人气。</p>
+      <button class="more" type="button" id="emptyBtn">去写一条</button>
+    </div>
+
+    <button class="more" type="button" id="moreBtn" hidden>再往下翻翻</button>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>留言存在 Cloudflare 的 KV 里</span>
+  <span>动态后台由 Cloudflare Pages 提供</span>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script>
-  const ADMIN_BACKEND_URL = "https://lybht.pages.dev";
-  const API = "";
-  const ADMIN_ACCOUNT = "管理员";
-
-  async function load(){
-    const res=await fetch(`${API}/msg`)
-    const d=await res.json()
-    const list=d.list||[]
-    let html=""
-    for(let i=list.length-1;i>=0;i--){
-      const it=list[i]
-      html+=`<div class="msg-item">
-        <div class="msg-nick">${it.nick}</div>
-        <div class="msg-time">${it.t}</div>
-        <div class="msg-text">${it.c}</div>
-      </div>`
-    }
-    document.getElementById("listBox").innerHTML=html
-  }
-
-  async function sendMsg(){
-    const nick=document.getElementById("nick").value.trim()
-    const c=document.getElementById("content").value.trim()
-
-    if(nick === ADMIN_ACCOUNT){
-      location.href = ADMIN_BACKEND_URL;
-      return;
-    }
-
-    if(!nick||!c)return alert("昵称和留言不能为空")
-    await fetch(`${API}/msg`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({nick,c})
-    })
-    document.getElementById("content").value=""
-    load()
-  }
-
-  load()
-  setInterval(load,10000)
-</script>
-</body>
