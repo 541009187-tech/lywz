@@ -96,6 +96,10 @@
     return d.getFullYear() === t.getFullYear() ? md : d.getFullYear() + '年' + md;
   }
 
+  function nickName() {
+    return (nameInput.value || '').trim() || '匿名访客';
+  }
+
   /* ---------------- 渲染 ---------------- */
   function render() {
     totalEl.textContent = state.total;
@@ -144,6 +148,14 @@
     said.className = 'said';
     said.textContent = m.content;
 
+    var replies = Array.isArray(m.replies) ? m.replies : [];
+    var replyWrap = null;
+    if (replies.length) {
+      replyWrap = document.createElement('div');
+      replyWrap.className = 'replies';
+      replies.forEach(function (r) { replyWrap.appendChild(replyEl(m, r)); });
+    }
+
     var foot = document.createElement('div');
     foot.className = 'note-foot';
 
@@ -159,6 +171,13 @@
     like.addEventListener('click', function () { likeMessage(m.id, like, cnt); });
     foot.appendChild(like);
 
+    var replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.className = 'reply-btn';
+    replyBtn.textContent = replies.length ? '回复 ' + replies.length : '回复';
+    replyBtn.addEventListener('click', function () { toggleReplyForm(el, m, replyBtn); });
+    foot.appendChild(replyBtn);
+
     var tokens = readTokens();
     if (tokens[m.id] || state.admin) {
       var del = document.createElement('button');
@@ -172,6 +191,7 @@
     el.appendChild(pin);
     el.appendChild(head);
     el.appendChild(said);
+    if (replyWrap) el.appendChild(replyWrap);
     el.appendChild(foot);
 
     if (freshIds.has(m.id)) {
@@ -179,6 +199,142 @@
       freshIds.delete(m.id);
     }
     return el;
+  }
+
+  function replyEl(m, r) {
+    var wrap = document.createElement('div');
+    wrap.className = 'reply';
+
+    var head = document.createElement('p');
+    head.className = 'reply-head';
+    var who = document.createElement('span');
+    who.className = 'reply-who';
+    who.textContent = r.name;
+    var when = document.createElement('span');
+    when.className = 'reply-when';
+    when.textContent = timeText(r.created_ms);
+    head.appendChild(who);
+    head.appendChild(when);
+
+    var said = document.createElement('p');
+    said.className = 'reply-said';
+    said.textContent = r.content;
+
+    wrap.appendChild(head);
+    wrap.appendChild(said);
+
+    var tokens = readTokens();
+    if (tokens['r' + r.id] || state.admin) {
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'reply-del';
+      del.textContent = '删';
+      del.addEventListener('click', function () { removeReply(m.id, r.id); });
+      wrap.appendChild(del);
+    }
+
+    return wrap;
+  }
+
+  /* ---------------- 回复输入框 ---------------- */
+  function toggleReplyForm(noteElRef, m, btn) {
+    var existing = noteElRef.querySelector('.reply-form');
+    if (existing) { existing.remove(); return; }
+
+    var box = document.createElement('div');
+    box.className = 'reply-form';
+
+    var input = document.createElement('textarea');
+    input.className = 'reply-input';
+    input.maxLength = 120;
+    input.rows = 2;
+    input.placeholder = '回复 ' + m.name + '：';
+
+    var row = document.createElement('div');
+    row.className = 'reply-actions';
+
+    var hint = document.createElement('span');
+    hint.className = 'reply-hint';
+    hint.textContent = '可以用 ' + nickName() + ' 的身份回复';
+
+    var send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'reply-send';
+    send.textContent = '发出';
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'reply-cancel';
+    cancel.textContent = '算了';
+
+    row.appendChild(hint);
+    row.appendChild(cancel);
+    row.appendChild(send);
+
+    box.appendChild(input);
+    box.appendChild(row);
+    noteElRef.insertBefore(box, noteElRef.querySelector('.note-foot'));
+
+    setTimeout(function () { input.focus(); }, 20);
+
+    cancel.addEventListener('click', function () { box.remove(); });
+
+    send.addEventListener('click', function () {
+      var text = input.value.trim();
+      if (!text) { toast('还没写内容'); input.focus(); return; }
+      send.disabled = true;
+      api('/api/messages/' + m.id + '/replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nickName(), content: text, client_id: CLIENT_ID })
+      }).then(function (data) {
+        m.replies = Array.isArray(m.replies) ? m.replies : [];
+        m.replies.push(data.reply);
+        m.reply_total = data.reply_total;
+
+        var tokens = readTokens();
+        tokens['r' + data.reply.id] = data.token;
+        writeTokens(tokens);
+
+        render();
+        toast('回复已经贴上了');
+      }).catch(function (err) {
+        toast(err.message || '回复没贴上');
+        send.disabled = false;
+      });
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        send.click();
+      }
+    });
+  }
+
+  function removeReply(messageId, replyId) {
+    var tokens = readTokens();
+    if (!tokens['r' + replyId] && !state.admin) return;
+    if (!window.confirm('删掉这条回复吗？')) return;
+
+    var headers = {};
+    if (tokens['r' + replyId]) headers['X-Delete-Token'] = tokens['r' + replyId];
+    if (state.admin) headers['X-Admin-Token'] = state.admin;
+
+    api('/api/messages/' + messageId + '/replies/' + replyId, { method: 'DELETE', headers: headers })
+      .then(function (data) {
+        delete tokens['r' + replyId];
+        writeTokens(tokens);
+        var item = state.items.filter(function (x) { return x.id === messageId; })[0];
+        if (item) {
+          item.replies = (item.replies || []).filter(function (r) { return r.id !== replyId; });
+          item.reply_total = data.reply_total;
+        }
+        render();
+        toast('回复已经删掉');
+      }).catch(function (err) {
+        toast(err.message);
+      });
   }
 
   /* ---------------- 读留言 ---------------- */
@@ -296,7 +452,7 @@
     });
   }
 
-  /* ---------------- 撤下 ---------------- */
+  /* ---------------- 撤下留言 ---------------- */
   function removeMessage(id) {
     var tokens = readTokens();
     if (!tokens[id] && !state.admin) return;
@@ -332,7 +488,7 @@
     var bar = document.createElement('div');
     bar.className = 'admin-bar';
     var tag = document.createElement('span');
-    tag.textContent = '管理员模式：可以撤下任何一条留言';
+    tag.textContent = '管理员模式：可以撤下任何留言和回复';
     var out = document.createElement('button');
     out.type = 'button';
     out.className = 'admin-out';

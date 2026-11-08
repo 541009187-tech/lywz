@@ -1,0 +1,67 @@
+/* ================= 回复 ================= */
+.replies{
+  display:flex;flex-direction:column;gap:9px;
+  margin-top:10px;padding-top:9px;
+  border-top:1px dashed rgba(80,58,30,.24);
+}
+.reply{
+  position:relative;
+  padding-left:9px;
+  border-left:2px solid rgba(70,50,28,.2);
+}
+.reply-head{display:flex;align-items:baseline;gap:7px;margin:0 0 2px;}
+.reply-who{
+  font-family:"STKaiti","KaiTi","楷体","Kaiti SC",serif;
+  font-size:13.5px;letter-spacing:.03em;color:#4a3728;
+}
+.reply-when{font-size:10.5px;color:#8a7358;}
+.reply-said{
+  margin:0;font-size:14.5px;line-height:1.75;color:#3a2c1e;
+  white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;
+}
+.reply-del{
+  position:absolute;right:0;top:0;
+  padding:2px 4px;
+  background:none;border:0;
+  font-size:10.5px;color:#8a5b46;
+  text-decoration:underline;text-underline-offset:2px;
+  cursor:pointer;
+}
+.reply-btn{
+  min-height:36px;padding:4px 8px;
+  background:none;border:0;
+  font-size:12.5px;color:#6d5a43;
+  cursor:pointer;
+  transition:color .15s;
+}
+.reply-btn:hover{color:#2f5749;text-decoration:underline;text-underline-offset:2px;}
+
+.reply-form{margin-top:10px;}
+.reply-input{
+  display:block;width:100%;
+  font-family:inherit;font-size:15px;line-height:1.7;color:#2e2620;
+  background:#fffdf6;
+  border:1px dashed rgba(70,50,28,.4);
+  border-radius:2px;
+  padding:7px 9px;
+  resize:vertical;
+  outline:none;
+}
+.reply-input::placeholder{color:#a08e78;font-size:13px;}
+.reply-input:focus{border-style:solid;border-color:#2f5749;}
+.reply-actions{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
+.reply-hint{flex:1;min-width:110px;font-size:11px;color:#8a7358;line-height:1.5;}
+.reply-send{
+  padding:7px 14px;
+  background:#2f5749;border:0;border-radius:2px;
+  color:#fdf9ee;font-size:12.5px;letter-spacing:.05em;
+  cursor:pointer;
+}
+.reply-send:hover{background:#356354;}
+.reply-send[disabled]{opacity:.6;cursor:progress;}
+.reply-cancel{
+  padding:7px 12px;
+  background:none;border:1px solid rgba(60,40,15,.3);border-radius:2px;
+  font-size:12.5px;color:#3b2a17;cursor:pointer;
+}
+.reply-cancel:hover{background:#f2e9d8;}
