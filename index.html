@@ -44,7 +44,7 @@
           <label class="swatch"><input type="radio" name="color" value="pink"><span class="dot" style="background:#f3c3c0"></span><span class="sr">粉色便签</span></label>
           <label class="swatch"><input type="radio" name="color" value="blue"><span class="dot" style="background:#bed6ee"></span><span class="sr">蓝色便签</span></label>
           <label class="swatch"><input type="radio" name="color" value="green"><span class="dot" style="background:#cfe4ad"></span><span class="sr">绿色便签</span></label>
-          <label class="swatch"><input type="radio" name="color" value="lilac"><span class="dot" style="background:#ddc7eb"></span><span class="sr">紫色便签</span></label>
+          <label class="swatch"><input type="radio" name="color" value="lilac"><span class="dot"><span class="dot" style="background:#ddc7eb"></span></span><span class="sr">紫色便签</span></label>
         </div>
         <span class="counter"><span id="counter">0</span>/200</span>
       </div>
@@ -83,7 +83,7 @@
 
 <footer class="foot">
   <span>留言存在 Cloudflare 的 KV 里</span>
-  <span>动态后台由 Cloudflare Pages 提供</span>
+  <span class="foot-right">动态后台由 Cloudflare Pages 提供<button class="admin-entry" type="button" id="adminBtn">管理员</button></span>
 </footer>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>

@@ -1,6 +1,6 @@
 /**
  * 留言墙 · Cloudflare Pages 动态后台（Pages Functions）
- * 路由：/api/messages、/api/messages/:id/like、/api/messages/:id
+ * 路由：/api/messages、/api/messages/:id/like、/api/messages/:id、/api/admin/*
  * 存储：复用仓库里已有的 KV 绑定 MSG_KV（不用 SQL 数据库）
  */
 
@@ -10,6 +10,13 @@ const MAX_CONTENT = 200;
 const MAX_BODY = 8 * 1024;
 const MAX_KEEP = 3000;
 const KEY = "wall:messages";
+
+/* 管理员 */
+const ADMIN_NAME = "管理员";
+const DEFAULT_ADMIN_PASSWORD = "123456";
+const ADMIN_PASSWORD_KEY = "wall:admin_password";
+const ADMIN_TOKENS_KEY = "wall:admin_tokens";
+const ADMIN_TTL = 7 * 24 * 60 * 60 * 1000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -64,6 +71,58 @@ async function saveAll(env, list) {
     list = list.slice(list.length - MAX_KEEP);
   }
   await env.MSG_KV.put(KEY, JSON.stringify(list));
+}
+
+/* ---------------- 管理员 ---------------- */
+async function getAdminPassword(env) {
+  const saved = await env.MSG_KV.get(ADMIN_PASSWORD_KEY);
+  return typeof saved === "string" && saved.trim() ? saved.trim() : DEFAULT_ADMIN_PASSWORD;
+}
+
+async function readAdminTokens(env) {
+  const raw = await env.MSG_KV.get(ADMIN_TOKENS_KEY, "json");
+  return Array.isArray(raw) ? raw : [];
+}
+
+async function adminLogin(request, env) {
+  const body = await readJson(request);
+  const name = cleanText(body.name, 20);
+  const password = typeof body.password === "string" ? body.password.trim() : "";
+
+  if (name !== ADMIN_NAME) return json({ ok: false, error: "名字要填「管理员」" }, 401);
+  if (!password) return json({ ok: false, error: "请输入密码" }, 400);
+
+  const expected = await getAdminPassword(env);
+  if (password !== expected) return json({ ok: false, error: "密码不对" }, 401);
+
+  const now = Date.now();
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const list = (await readAdminTokens(env)).filter(function (t) { return t && t.exp > now; });
+  list.push({ token: token, exp: now + ADMIN_TTL });
+  await env.MSG_KV.put(ADMIN_TOKENS_KEY, JSON.stringify(list));
+
+  return json({ ok: true, token: token, exp: now + ADMIN_TTL });
+}
+
+async function adminTokenValid(request, env) {
+  const token = (request.headers.get("X-Admin-Token") || "").trim();
+  if (!token) return false;
+  const now = Date.now();
+  const list = await readAdminTokens(env);
+  return list.some(function (t) { return t && t.token === token && t.exp > now; });
+}
+
+async function adminLogout(request, env) {
+  const token = (request.headers.get("X-Admin-Token") || "").trim();
+  if (token) {
+    const list = (await readAdminTokens(env)).filter(function (t) { return t.token !== token; });
+    await env.MSG_KV.put(ADMIN_TOKENS_KEY, JSON.stringify(list));
+  }
+  return json({ ok: true });
+}
+
+async function adminCheck(request, env) {
+  return json({ ok: true, admin: await adminTokenValid(request, env) });
 }
 
 /* ---------------- 读留言 ---------------- */
@@ -153,13 +212,14 @@ async function likeMessage(request, env, id) {
 
 /* ---------------- 撤下 ---------------- */
 async function deleteMessage(request, env, id) {
+  const admin = await adminTokenValid(request, env);
   const token = (request.headers.get("X-Delete-Token") || "").trim();
-  if (!token) return json({ ok: false, error: "缺少撤下凭证" }, 400);
+  if (!admin && !token) return json({ ok: false, error: "缺少撤下凭证" }, 400);
 
   const list = await loadAll(env);
   const index = list.findIndex(function (m) { return m.id === id; });
   if (index < 0) return json({ ok: false, error: "这条留言已经不在了" }, 404);
-  if (list[index].delete_token !== token) {
+  if (!admin && list[index].delete_token !== token) {
     return json({ ok: false, error: "只有写下它的人才能撤下" }, 403);
   }
 
@@ -184,6 +244,21 @@ export async function onRequest(context) {
     if (path === "/api/messages") {
       if (method === "GET") return listMessages(url, env);
       if (method === "POST") return createMessage(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/login") {
+      if (method === "POST") return adminLogin(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/logout") {
+      if (method === "POST") return adminLogout(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/check") {
+      if (method === "GET") return adminCheck(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
