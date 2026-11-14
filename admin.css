@@ -88,3 +88,7 @@
 .note-head .geo{font-size:11px;color:#7a6248;}
 .note-head .when{margin-left:auto;}
 .reply-head .geo{font-size:10.5px;color:#8a7358;}
+
+/* 管理员可见的浏览器/系统/设备 */
+.note-head .sys{font-size:11px;color:#8a7358;}
+.reply-head .sys{font-size:10.5px;color:#9a8568;}

@@ -17,6 +17,8 @@ const MAX_KEEP = 3000;
 const MAX_REPLIES = 30;
 const KEY = "wall:messages";
 const BANNED_KEY = "wall:banned_names";
+const REGISTRY_KEY = "wall:name_registry";
+const DEFAULT_NAME = "匿名访客";
 
 /* 管理员。默认密码不写明文，只放 SHA-256；KV 里有 wall:admin_password 时以 KV 为准 */
 const ADMIN_NAME = "管理员";
@@ -76,18 +78,73 @@ function readGeo(request) {
   return { country: country, region: region, city: city };
 }
 
-function publicReply(r, withGeo) {
+/* 访客设备信息：浏览器、系统、设备类型、UA，由前端上报，UA 头兜底 */
+function readSys(body, request) {
+  const s = body && body.sys && typeof body.sys === "object" ? body.sys : {};
+  const ua = cleanText(request.headers.get("User-Agent") || s.ua || "", 200);
+  const os = cleanText(s.os, 30);
+  const browser = cleanText(s.browser, 30);
+  const device = cleanText(s.device, 20);
+  if (!ua && !os && !browser && !device) return null;
+  return { ua: ua, os: os, browser: browser, device: device };
+}
+
+async function loadRegistry(env) {
+  const raw = await env.MSG_KV.get(REGISTRY_KEY, "json");
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+async function saveRegistry(env, reg) {
+  await env.MSG_KV.put(REGISTRY_KEY, JSON.stringify(reg));
+}
+
+function sysSame(a, b) {
+  if (!a || !b) return false;
+  return (a.ua || "") === (b.ua || "")
+    && (a.os || "") === (b.os || "")
+    && (a.browser || "") === (b.browser || "")
+    && (a.device || "") === (b.device || "");
+}
+
+/* 名字占用：管理员名、默认匿名名不参与。
+   同一设备判定：client_id 一致，或 UA/系统/浏览器/设备完全一致；不一致则名字已被占用。 */
+async function checkNameTaken(env, name, cid, sys) {
+  const target = normName(name);
+  if (!target || name === ADMIN_NAME || name === DEFAULT_NAME) return { allowed: true };
+
+  const reg = await loadRegistry(env);
+  const owner = reg[target];
+  const now = Date.now();
+
+  if (!owner) {
+    reg[target] = { name: name, client_id: cid || "", sys: sys, first_ms: now, last_ms: now };
+    await saveRegistry(env, reg);
+    return { allowed: true };
+  }
+
+  const sameDevice = (owner.client_id && cid && owner.client_id === cid) || sysSame(owner.sys, sys);
+  if (!sameDevice) return { allowed: false, code: "name_taken" };
+
+  owner.last_ms = now;
+  if (cid) owner.client_id = cid;
+  if (sys) owner.sys = sys;
+  await saveRegistry(env, reg);
+  return { allowed: true };
+}
+
+function publicReply(r, withAdmin) {
   const out = {
     id: r.id,
     name: r.name,
     content: r.content,
     created_ms: r.created_ms,
   };
-  if (withGeo && r.geo) out.geo = r.geo;
+  if (withAdmin && r.geo) out.geo = r.geo;
+  if (withAdmin && r.sys) out.sys = r.sys;
   return out;
 }
 
-function publicMessage(m, cid, withGeo) {
+function publicMessage(m, cid, withAdmin) {
   const replies = Array.isArray(m.replies) ? m.replies : [];
   const out = {
     id: m.id,
@@ -97,10 +154,11 @@ function publicMessage(m, cid, withGeo) {
     created_ms: m.created_ms,
     likes: m.likes || 0,
     liked: cid ? (m.likedBy || []).includes(cid) : false,
-    replies: replies.map(function (r) { return publicReply(r, withGeo); }),
+    replies: replies.map(function (r) { return publicReply(r, withAdmin); }),
     reply_total: replies.length,
   };
-  if (withGeo && m.geo) out.geo = m.geo;
+  if (withAdmin && m.geo) out.geo = m.geo;
+  if (withAdmin && m.sys) out.sys = m.sys;
   return out;
 }
 
@@ -305,7 +363,7 @@ async function listMessages(request, env) {
 /* ---------------- 贴留言 ---------------- */
 async function createMessage(request, env) {
   const body = await readJson(request);
-  const name = cleanText(body.name, MAX_NAME) || "匿名访客";
+  const name = cleanText(body.name, MAX_NAME) || DEFAULT_NAME;
   const content = cleanText(body.content, MAX_CONTENT);
   const color = NOTE_COLORS.has(body.color) ? body.color : "yellow";
 
@@ -313,6 +371,13 @@ async function createMessage(request, env) {
 
   if (isBannedName(name, await loadBanned(env))) {
     return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
+  }
+
+  const cid = cleanText(body.client_id, 64);
+  const sys = readSys(body, request);
+  const owner = await checkNameTaken(env, name, cid, sys);
+  if (!owner.allowed) {
+    return json({ ok: false, error: "该名称已被占用，请换一个名称", code: owner.code }, 403);
   }
 
   const list = await loadAll(env);
@@ -330,6 +395,7 @@ async function createMessage(request, env) {
     likedBy: [],
     replies: [],
     geo: readGeo(request),
+    sys: sys,
   };
 
   list.push(msg);
@@ -368,13 +434,20 @@ async function likeMessage(request, env, id) {
 /* ---------------- 回复 ---------------- */
 async function createReply(request, env, id) {
   const body = await readJson(request);
-  const name = cleanText(body.name, MAX_NAME) || "匿名访客";
+  const name = cleanText(body.name, MAX_NAME) || DEFAULT_NAME;
   const content = cleanText(body.content, MAX_REPLY);
 
   if (!content) return json({ ok: false, error: "回复内容不能为空" }, 400);
 
   if (isBannedName(name, await loadBanned(env))) {
     return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
+  }
+
+  const cid = cleanText(body.client_id, 64);
+  const sys = readSys(body, request);
+  const owner = await checkNameTaken(env, name, cid, sys);
+  if (!owner.allowed) {
+    return json({ ok: false, error: "该名称已被占用，请换一个名称", code: owner.code }, 403);
   }
 
   const list = await loadAll(env);
@@ -396,6 +469,7 @@ async function createReply(request, env, id) {
     created_ms: Date.now(),
     delete_token: crypto.randomUUID().replace(/-/g, ""),
     geo: readGeo(request),
+    sys: sys,
   };
 
   msg.replies.push(reply);
