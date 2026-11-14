@@ -136,6 +136,45 @@
     return parts.join(' · ');
   }
 
+  /* 采集浏览器 / 系统 / 设备类型，随发帖一起上报，用于名字占用比对 */
+  function readSys() {
+    var ua = navigator.userAgent || '';
+    var os = '未知系统', browser = '未知浏览器', device = '桌面';
+    if (/Android/i.test(ua)) {
+      os = 'Android';
+      device = /Mobile/i.test(ua) ? '手机' : '平板';
+    } else if (/iPhone|iPad|iPod/i.test(ua)) {
+      os = 'iOS';
+      device = /iPad/i.test(ua) ? '平板' : '手机';
+    } else if (/Windows/i.test(ua)) {
+      os = 'Windows';
+    } else if (/Mac OS X/i.test(ua)) {
+      os = 'macOS';
+    } else if (/CrOS/i.test(ua)) {
+      os = 'ChromeOS';
+    } else if (/Linux/i.test(ua)) {
+      os = 'Linux';
+    }
+
+    if (/MicroMessenger/i.test(ua)) browser = '微信内置浏览器';
+    else if (/Edg\//i.test(ua)) browser = 'Edge';
+    else if (/OPR\//i.test(ua)) browser = 'Opera';
+    else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+    else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+    else if (/Safari\//i.test(ua)) browser = 'Safari';
+
+    return { os: os, browser: browser, device: device, ua: ua.slice(0, 200) };
+  }
+
+  function sysText(sys) {
+    if (!sys) return '';
+    var parts = [];
+    if (sys.browser) parts.push(sys.browser);
+    if (sys.os) parts.push(sys.os);
+    if (sys.device) parts.push(sys.device);
+    return parts.join(' · ');
+  }
+
   /* ---------------- 禁用名字 ---------------- */
   function normName(v) {
     return String(v || '').replace(/[\u3000\s]+/g, ' ').trim().toLowerCase();
@@ -230,6 +269,12 @@
       geo.textContent = geoText(m.geo);
       head.appendChild(geo);
     }
+    if (state.admin && m.sys) {
+      var sysEl = document.createElement('span');
+      sysEl.className = 'sys';
+      sysEl.textContent = sysText(m.sys);
+      head.appendChild(sysEl);
+    }
     head.appendChild(when);
 
     var said = document.createElement('p');
@@ -307,6 +352,12 @@
       geo.className = 'geo reply-geo';
       geo.textContent = geoText(r.geo);
       head.appendChild(geo);
+    }
+    if (state.admin && r.sys) {
+      var sysEl = document.createElement('span');
+      sysEl.className = 'sys reply-sys';
+      sysEl.textContent = sysText(r.sys);
+      head.appendChild(sysEl);
     }
     head.appendChild(when);
 
@@ -386,7 +437,7 @@
       api('/api/messages/' + m.id + '/replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: who, content: text, client_id: CLIENT_ID })
+        body: JSON.stringify({ name: who, content: text, client_id: CLIENT_ID, sys: readSys() })
       }).then(function (data) {
         m.replies = Array.isArray(m.replies) ? m.replies : [];
         m.replies.push(data.reply);
@@ -401,6 +452,7 @@
         toast('回复已经贴上了');
       }).catch(function (err) {
         toast(err.message || '回复没贴上');
+        if (err.message && err.message.indexOf('已被占用') >= 0) nameInput.focus();
         send.disabled = false;
       });
     });
@@ -495,7 +547,8 @@
         name: usedName,
         content: content,
         color: color,
-        client_id: CLIENT_ID
+        client_id: CLIENT_ID,
+        sys: readSys()
       })
     }).then(function (data) {
       var tokens = readTokens();
@@ -528,6 +581,8 @@
       if (err.message && err.message.indexOf('已被禁用') >= 0) {
         nameInput.focus();
         loadBannedNames();
+      } else if (err.message && err.message.indexOf('已被占用') >= 0) {
+        nameInput.focus();
       }
     }).then(function () {
       submitBtn.disabled = false;
