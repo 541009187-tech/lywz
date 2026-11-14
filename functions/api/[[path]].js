@@ -265,6 +265,22 @@ async function adminBannedRemove(request, env) {
   return json({ ok: true, names: banned });
 }
 
+/* 管理员释放某个名字的设备绑定（名字被占错时可解封） */
+async function adminRegistryRelease(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能操作" }, 403);
+  }
+  const body = await readJson(request);
+  const name = cleanText(body.name, MAX_NAME);
+  const target = normName(name);
+  if (!target) return json({ ok: false, error: "要释放的名字不能为空" }, 400);
+
+  const reg = await loadRegistry(env);
+  delete reg[target];
+  await saveRegistry(env, reg);
+  return json({ ok: true, released: name });
+}
+
 /* ---------------- 管理员 ---------------- */
 async function getSavedAdminPassword(env) {
   const saved = await env.MSG_KV.get(ADMIN_PASSWORD_KEY);
@@ -562,6 +578,11 @@ export async function onRequest(context) {
       if (method === "GET") return adminBannedList(request, env);
       if (method === "POST") return adminBannedAdd(request, env);
       if (method === "DELETE") return adminBannedRemove(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/registry") {
+      if (method === "DELETE") return adminRegistryRelease(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
