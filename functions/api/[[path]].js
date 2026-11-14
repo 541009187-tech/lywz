@@ -64,18 +64,32 @@ function normName(value) {
     .toLowerCase();
 }
 
-function publicReply(r) {
-  return {
+/* 访客所在地：取自 Cloudflare 的 request.cf（国家/省/市），取不到就返回 null */
+function readGeo(request) {
+  const cf = request && request.cf;
+  if (!cf || typeof cf !== "object") return null;
+  let country = cleanText(cf.country, 8);
+  if (country === "XX") country = "";
+  const region = cleanText(cf.region, 30);
+  const city = cleanText(cf.city, 30);
+  if (!country && !region && !city) return null;
+  return { country: country, region: region, city: city };
+}
+
+function publicReply(r, withGeo) {
+  const out = {
     id: r.id,
     name: r.name,
     content: r.content,
     created_ms: r.created_ms,
   };
+  if (withGeo && r.geo) out.geo = r.geo;
+  return out;
 }
 
-function publicMessage(m, cid) {
+function publicMessage(m, cid, withGeo) {
   const replies = Array.isArray(m.replies) ? m.replies : [];
-  return {
+  const out = {
     id: m.id,
     name: m.name,
     content: m.content,
@@ -83,9 +97,11 @@ function publicMessage(m, cid) {
     created_ms: m.created_ms,
     likes: m.likes || 0,
     liked: cid ? (m.likedBy || []).includes(cid) : false,
-    replies: replies.map(publicReply),
+    replies: replies.map(function (r) { return publicReply(r, withGeo); }),
     reply_total: replies.length,
   };
+  if (withGeo && m.geo) out.geo = m.geo;
+  return out;
 }
 
 async function loadAll(env) {
@@ -257,13 +273,15 @@ async function adminCheck(request, env) {
 }
 
 /* ---------------- 读留言 ---------------- */
-async function listMessages(url, env) {
+async function listMessages(request, env) {
+  const url = new URL(request.url);
   const p = url.searchParams;
   const limit = Math.min(50, Math.max(1, parseInt(p.get("limit") || "9", 10) || 9));
   const offset = Math.max(0, parseInt(p.get("offset") || "0", 10) || 0);
   const order = p.get("order") === "old" ? "asc" : "desc";
   const q = cleanText(p.get("q") || "", 40).toLowerCase();
   const cid = cleanText(p.get("client_id") || "", 64);
+  const admin = await adminTokenValidStrict(request, env);
 
   let list = await loadAll(env);
   if (q) {
@@ -280,7 +298,7 @@ async function listMessages(url, env) {
     ok: true,
     total: list.length,
     now: Date.now(),
-    messages: list.slice(offset, offset + limit).map(function (m) { return publicMessage(m, cid); }),
+    messages: list.slice(offset, offset + limit).map(function (m) { return publicMessage(m, cid, admin); }),
   });
 }
 
@@ -311,6 +329,7 @@ async function createMessage(request, env) {
     likes: 0,
     likedBy: [],
     replies: [],
+    geo: readGeo(request),
   };
 
   list.push(msg);
@@ -321,7 +340,7 @@ async function createMessage(request, env) {
     token: msg.delete_token,
     total: list.length,
     now: Date.now(),
-    message: publicMessage(msg, ""),
+    message: publicMessage(msg, "", false),
   }, 201);
 }
 
@@ -376,12 +395,13 @@ async function createReply(request, env, id) {
     content: content,
     created_ms: Date.now(),
     delete_token: crypto.randomUUID().replace(/-/g, ""),
+    geo: readGeo(request),
   };
 
   msg.replies.push(reply);
   await saveAll(env, list);
 
-  return json({ ok: true, token: reply.delete_token, reply: publicReply(reply), reply_total: msg.replies.length }, 201);
+  return json({ ok: true, token: reply.delete_token, reply: publicReply(reply, false), reply_total: msg.replies.length }, 201);
 }
 
 async function deleteReply(request, env, id, rid) {
@@ -439,7 +459,7 @@ export async function onRequest(context) {
 
   try {
     if (path === "/api/messages") {
-      if (method === "GET") return listMessages(url, env);
+      if (method === "GET") return listMessages(request, env);
       if (method === "POST") return createMessage(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
