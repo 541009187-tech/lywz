@@ -23,6 +23,8 @@
   border-radius:2px;
 }
 .ban-name{font-size:13.5px;color:#33261a;word-break:break-all;line-height:1.5;}
+.reg-left{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.ban-meta{font-size:11px;color:#8a7358;word-break:break-all;line-height:1.5;}
 .ban-del{
   flex:0 0 auto;
   padding:4px 9px;

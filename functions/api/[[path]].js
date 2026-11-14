@@ -281,6 +281,28 @@ async function adminRegistryRelease(request, env) {
   return json({ ok: true, released: name });
 }
 
+/* 管理员查看当前被占用（绑定设备）的名字 */
+async function adminRegistryList(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能操作" }, 403);
+  }
+  const reg = await loadRegistry(env);
+  const entries = Object.keys(reg).map(function (k) {
+    const o = reg[k] || {};
+    const s = o.sys || {};
+    return {
+      name: o.name || k,
+      browser: s.browser || "",
+      os: s.os || "",
+      device: s.device || "",
+      first_ms: o.first_ms || 0,
+      last_ms: o.last_ms || 0,
+    };
+  });
+  entries.sort(function (a, b) { return (b.last_ms || 0) - (a.last_ms || 0); });
+  return json({ ok: true, entries: entries });
+}
+
 /* ---------------- 管理员 ---------------- */
 async function getSavedAdminPassword(env) {
   const saved = await env.MSG_KV.get(ADMIN_PASSWORD_KEY);
@@ -582,6 +604,7 @@ export async function onRequest(context) {
     }
 
     if (path === "/api/admin/registry") {
+      if (method === "GET") return adminRegistryList(request, env);
       if (method === "DELETE") return adminRegistryRelease(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
