@@ -112,6 +112,30 @@
     return (nameInput.value || '').trim() || '匿名访客';
   }
 
+  /* 省份英文名转中文（Cloudflare 返回的 region 是英文） */
+  var PROVINCE = {
+    'beijing': '北京', 'shanghai': '上海', 'tianjin': '天津', 'chongqing': '重庆',
+    'guangdong': '广东', 'guangxi': '广西', 'jiangsu': '江苏', 'zhejiang': '浙江',
+    'fujian': '福建', 'hubei': '湖北', 'hunan': '湖南', 'henan': '河南', 'hebei': '河北',
+    'shandong': '山东', 'shanxi': '山西', 'shaanxi': '陕西', 'anhui': '安徽', 'jiangxi': '江西',
+    'sichuan': '四川', 'hainan': '海南', 'guizhou': '贵州', 'yunnan': '云南', 'gansu': '甘肃',
+    'qinghai': '青海', 'liaoning': '辽宁', 'jilin': '吉林', 'heilongjiang': '黑龙江',
+    'inner mongolia': '内蒙古', 'neimenggu': '内蒙古', 'xinjiang': '新疆', 'xizang': '西藏',
+    'tibet': '西藏', 'ningxia': '宁夏', 'hong kong': '香港', 'macau': '澳门', 'macao': '澳门',
+    'taiwan': '台湾'
+  };
+
+  function geoText(geo) {
+    if (!geo) return '';
+    var region = (geo.region || '').trim();
+    var regionCn = PROVINCE[region.toLowerCase()] || region;
+    var parts = [];
+    if (regionCn) parts.push(regionCn);
+    if (geo.city) parts.push(geo.city);
+    if (!parts.length && geo.country) parts.push(geo.country);
+    return parts.join(' · ');
+  }
+
   /* ---------------- 禁用名字 ---------------- */
   function normName(v) {
     return String(v || '').replace(/[\u3000\s]+/g, ' ').trim().toLowerCase();
@@ -200,6 +224,12 @@
     when.className = 'when';
     when.textContent = timeText(m.created_ms);
     head.appendChild(who);
+    if (state.admin && m.geo) {
+      var geo = document.createElement('span');
+      geo.className = 'geo';
+      geo.textContent = geoText(m.geo);
+      head.appendChild(geo);
+    }
     head.appendChild(when);
 
     var said = document.createElement('p');
@@ -272,6 +302,12 @@
     when.className = 'reply-when';
     when.textContent = timeText(r.created_ms);
     head.appendChild(who);
+    if (state.admin && r.geo) {
+      var geo = document.createElement('span');
+      geo.className = 'geo reply-geo';
+      geo.textContent = geoText(r.geo);
+      head.appendChild(geo);
+    }
     head.appendChild(when);
 
     var said = document.createElement('p');
@@ -416,7 +452,8 @@
     });
     if (state.q) params.set('q', state.q);
 
-    api('/api/messages?' + params.toString()).then(function (data) {
+    var headers = state.admin ? { 'X-Admin-Token': state.admin } : {};
+    api('/api/messages?' + params.toString(), { headers: headers }).then(function (data) {
       state.clock = data.now - Date.now();
       state.total = data.total;
       state.items = reset ? data.messages : state.items.concat(data.messages);
@@ -566,7 +603,7 @@
     var bar = document.createElement('div');
     bar.className = 'admin-bar';
     var tag = document.createElement('span');
-    tag.textContent = '管理员模式：可以撤下留言、回复，也可以禁用名字';
+    tag.textContent = '管理员模式：可以查看留言来自哪里、撤下留言和回复，也可以禁用名字';
 
     var actions = document.createElement('div');
     actions.className = 'admin-actions';
