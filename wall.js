@@ -669,6 +669,12 @@
     banBtn.textContent = '禁用名字';
     banBtn.addEventListener('click', openBanModal);
 
+    var regBtn = document.createElement('button');
+    regBtn.type = 'button';
+    regBtn.className = 'admin-out';
+    regBtn.textContent = '释放名字';
+    regBtn.addEventListener('click', openRegModal);
+
     var out = document.createElement('button');
     out.type = 'button';
     out.className = 'admin-out';
@@ -676,6 +682,7 @@
     out.addEventListener('click', function () { exitAdmin(false); });
 
     actions.appendChild(banBtn);
+    actions.appendChild(regBtn);
     actions.appendChild(out);
 
     bar.appendChild(tag);
@@ -689,6 +696,7 @@
     updateAdminUI();
     render();
     if (banModal) banModal.hidden = true;
+    if (regModal) regModal.hidden = true;
     if (!token) return;
     api('/api/admin/logout', { method: 'POST', headers: { 'X-Admin-Token': token } })
       .catch(function () {});
@@ -887,6 +895,98 @@
       bannedNames = Array.isArray(data.names) ? data.names : [];
       renderBanList(bannedNames);
       toast('「' + name + '」已经解除禁用');
+    }).catch(function (err) {
+      toast(err.message);
+      btn.disabled = false;
+    });
+  }
+
+  /* ---------------- 占用名字（设备绑定）管理 ---------------- */
+  var regModal = null;
+
+  function buildRegModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'regModal';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="regTitle">',
+      '  <h3 id="regTitle">占用名字</h3>',
+      '  <p class="ban-hint">下面是已经和某台设备绑定的名字。释放之后，别的设备才可以再用这个名字。</p>',
+      '  <div class="ban-list" id="regList"></div>',
+      '  <div class="modal-actions"><button type="button" class="ghost" id="regClose">关闭</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.hidden = true; });
+    wrap.querySelector('#regClose').addEventListener('click', function () { wrap.hidden = true; });
+    return wrap;
+  }
+
+  function openRegModal() {
+    if (!regModal) regModal = buildRegModal();
+    regModal.hidden = false;
+    refreshRegList();
+  }
+
+  function refreshRegList() {
+    if (!state.admin) return;
+    api('/api/admin/registry', { method: 'GET', headers: { 'X-Admin-Token': state.admin } })
+      .then(function (data) {
+        renderRegList(Array.isArray(data.entries) ? data.entries : []);
+      }).catch(function (err) {
+        renderRegList([]);
+        toast(err.message);
+      });
+  }
+
+  function renderRegList(entries) {
+    var box = regModal.querySelector('#regList');
+    box.textContent = '';
+    if (!entries.length) {
+      var empty = document.createElement('p');
+      empty.className = 'ban-empty';
+      empty.textContent = '当前没有被占用的名字。';
+      box.appendChild(empty);
+      return;
+    }
+    entries.forEach(function (e) {
+      var row = document.createElement('div');
+      row.className = 'ban-row';
+
+      var left = document.createElement('div');
+      left.className = 'reg-left';
+      var span = document.createElement('span');
+      span.className = 'ban-name';
+      span.textContent = e.name;
+      var meta = document.createElement('span');
+      meta.className = 'ban-meta';
+      var sys = sysText({ browser: e.browser, os: e.os, device: e.device });
+      meta.textContent = sys ? sys + ' · ' + timeText(e.last_ms) : timeText(e.last_ms);
+      left.appendChild(span);
+      left.appendChild(meta);
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ban-del';
+      btn.textContent = '释放';
+      btn.addEventListener('click', function () { releaseReg(e.name, btn); });
+      row.appendChild(left);
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  function releaseReg(name, btn) {
+    btn.disabled = true;
+    api('/api/admin/registry', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.admin },
+      body: JSON.stringify({ name: name })
+    }).then(function () {
+      toast('已释放「' + name + '」');
+      refreshRegList();
     }).catch(function (err) {
       toast(err.message);
       btn.disabled = false;
