@@ -66,6 +66,12 @@ function normName(value) {
     .toLowerCase();
 }
 
+/* 保留名：管理员名、默认匿名名不参与设备占用，任何设备都能用 */
+function isReservedName(name) {
+  const t = normName(name);
+  return !t || t === normName(ADMIN_NAME) || t === normName(DEFAULT_NAME);
+}
+
 /* 访客所在地：取自 Cloudflare 的 request.cf（国家/省/市），取不到就返回 null */
 function readGeo(request) {
   const cf = request && request.cf;
@@ -106,13 +112,22 @@ function sysSame(a, b) {
     && (a.device || "") === (b.device || "");
 }
 
-/* 名字占用：管理员名、默认匿名名不参与。
+/* 名字占用：保留名（管理员名、匿名访客）不参与，任何设备都能用。
    同一设备判定：client_id 一致，或 UA/系统/浏览器/设备完全一致；不一致则名字已被占用。 */
 async function checkNameTaken(env, name, cid, sys) {
   const target = normName(name);
-  if (!target || name === ADMIN_NAME || name === DEFAULT_NAME) return { allowed: true };
+  if (isReservedName(name)) return { allowed: true };
 
   const reg = await loadRegistry(env);
+
+  // 清掉历史上误登记的保留名绑定，避免旧数据卡住新设备
+  const reserved = [normName(ADMIN_NAME), normName(DEFAULT_NAME)];
+  let cleaned = false;
+  reserved.forEach(function (r) {
+    if (r && reg[r]) { delete reg[r]; cleaned = true; }
+  });
+  if (cleaned) await saveRegistry(env, reg);
+
   const owner = reg[target];
   const now = Date.now();
 
@@ -281,24 +296,27 @@ async function adminRegistryRelease(request, env) {
   return json({ ok: true, released: name });
 }
 
-/* 管理员查看当前被占用（绑定设备）的名字 */
+/* 管理员查看当前被占用（绑定设备）的名字（保留名不显示） */
 async function adminRegistryList(request, env) {
   if (!(await adminTokenValidStrict(request, env))) {
     return json({ ok: false, error: "只有管理员能操作" }, 403);
   }
   const reg = await loadRegistry(env);
-  const entries = Object.keys(reg).map(function (k) {
-    const o = reg[k] || {};
-    const s = o.sys || {};
-    return {
-      name: o.name || k,
-      browser: s.browser || "",
-      os: s.os || "",
-      device: s.device || "",
-      first_ms: o.first_ms || 0,
-      last_ms: o.last_ms || 0,
-    };
-  });
+  const reserved = [normName(ADMIN_NAME), normName(DEFAULT_NAME)];
+  const entries = Object.keys(reg)
+    .filter(function (k) { return reserved.indexOf(k) < 0; })
+    .map(function (k) {
+      const o = reg[k] || {};
+      const s = o.sys || {};
+      return {
+        name: o.name || k,
+        browser: s.browser || "",
+        os: s.os || "",
+        device: s.device || "",
+        first_ms: o.first_ms || 0,
+        last_ms: o.last_ms || 0,
+      };
+    });
   entries.sort(function (a, b) { return (b.last_ms || 0) - (a.last_ms || 0); });
   return json({ ok: true, entries: entries });
 }
