@@ -52,10 +52,16 @@
         <span class="counter"><span id="counter">0</span>/200</span>
       </div>
 
-      <button class="submit" type="submit" id="submitBtn">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13M12 16l-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        贴上墙
-      </button>
+      <div class="compose-actions">
+        <button class="submit" type="submit" id="submitBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13M12 16l-4.5-4.5M12 16l4.5-4.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          贴上墙
+        </button>
+        <div class="draft-actions">
+          <button class="draft-btn" type="button" id="draftBtn">存为草稿</button>
+          <button class="draft-btn" type="button" id="draftBoxBtn">草稿箱</button>
+        </div>
+      </div>
       <p class="hint">按 Ctrl + Enter 也能贴上</p>
     </form>
   </div>
