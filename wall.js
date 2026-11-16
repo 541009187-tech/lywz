@@ -24,6 +24,8 @@
   var toastEl = document.getElementById('toast');
   var wallBar = document.querySelector('.wall-bar');
   var adminBtn = document.getElementById('adminBtn');
+  var draftBtn = document.getElementById('draftBtn');
+  var draftBoxBtn = document.getElementById('draftBoxBtn');
 
   var CLIENT_ID = getClientId();
   state.admin = readAdminToken();
@@ -76,6 +78,18 @@
     } catch (e) {}
   }
 
+  /* ---------------- 草稿箱（只存本机浏览器，不上后台） ---------------- */
+  function readDrafts() {
+    try {
+      var d = JSON.parse(localStorage.getItem('wall_drafts') || '[]');
+      return Array.isArray(d) ? d : [];
+    } catch (e) { return []; }
+  }
+
+  function writeDrafts(d) {
+    try { localStorage.setItem('wall_drafts', JSON.stringify(d.slice(0, 20))); } catch (e) {}
+  }
+
   /* ---------------- 小工具 ---------------- */
   var toastTimer = null;
   function toast(msg) {
@@ -105,7 +119,7 @@
     if (diff < 7 * 864e5) return Math.floor(diff / 864e5) + ' 天前';
     var d = new Date(ms), t = new Date(now);
     var md = (d.getMonth() + 1) + '月' + d.getDate() + '日';
-    return d.getFullYear() === t.getFullYear() ? md : d.getFullYear() + '年' + md;
+    return d.getFullYear() === t.getFullYear() ? md : d.getFullYear() + ' 年 ' + md;
   }
 
   function nickName() {
@@ -601,6 +615,134 @@
     }
   });
 
+  /* ---------------- 草稿箱 ---------------- */
+  var draftModal = null;
+
+  function buildDraftModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'draftModal';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="draftTitle">',
+      '  <h3 id="draftTitle">草稿箱</h3>',
+      '  <p class="ban-hint">草稿只存在这台设备的浏览器里，换设备看不到；点「还原」可以接着编辑。</p>',
+      '  <div class="ban-list" id="draftList"></div>',
+      '  <div class="modal-actions"><button type="button" class="ghost" id="draftClose">关闭</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.hidden = true; });
+    wrap.querySelector('#draftClose').addEventListener('click', function () { wrap.hidden = true; });
+    return wrap;
+  }
+
+  function openDraftModal() {
+    if (!draftModal) draftModal = buildDraftModal();
+    draftModal.hidden = false;
+    renderDraftList();
+  }
+
+  function saveDraft() {
+    var content = contentInput.value.trim();
+    if (!content) {
+      toast('先写点内容再存草稿');
+      contentInput.focus();
+      return;
+    }
+    var colorInput = form.querySelector('input[name="color"]:checked');
+    var color = colorInput ? colorInput.value : 'yellow';
+    var drafts = readDrafts();
+    drafts.unshift({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: nameInput.value.trim(),
+      content: content,
+      color: color,
+      saved_ms: Date.now()
+    });
+    writeDrafts(drafts);
+    updateDraftBadge();
+    toast('已存入草稿箱');
+  }
+
+  function renderDraftList() {
+    var box = draftModal.querySelector('#draftList');
+    box.textContent = '';
+    var drafts = readDrafts();
+    if (!drafts.length) {
+      var empty = document.createElement('p');
+      empty.className = 'ban-empty';
+      empty.textContent = '还没有草稿。';
+      box.appendChild(empty);
+      return;
+    }
+    drafts.forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'ban-row';
+
+      var left = document.createElement('div');
+      left.className = 'reg-left';
+      var span = document.createElement('span');
+      span.className = 'ban-name';
+      span.textContent = d.name || '匿名访客';
+      var meta = document.createElement('span');
+      meta.className = 'ban-meta';
+      var preview = d.content.length > 40 ? d.content.slice(0, 40) + '…' : d.content;
+      meta.textContent = preview + ' · ' + timeText(d.saved_ms);
+      left.appendChild(span);
+      left.appendChild(meta);
+
+      var ops = document.createElement('div');
+      ops.className = 'draft-ops';
+      var restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'ban-del';
+      restore.textContent = '还原';
+      restore.addEventListener('click', function () { restoreDraft(d.id); });
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ban-del';
+      del.textContent = '删';
+      del.addEventListener('click', function () { deleteDraft(d.id, del); });
+      ops.appendChild(restore);
+      ops.appendChild(del);
+
+      row.appendChild(left);
+      row.appendChild(ops);
+      box.appendChild(row);
+    });
+  }
+
+  function restoreDraft(id) {
+    var drafts = readDrafts();
+    var d = drafts.filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    nameInput.value = d.name || '';
+    contentInput.value = d.content || '';
+    counterEl.textContent = String((d.content || '').length);
+    if (d.color) {
+      var radio = form.querySelector('input[name="color"][value="' + d.color + '"]');
+      if (radio) radio.checked = true;
+    }
+    draftModal.hidden = true;
+    contentInput.focus();
+    toast('草稿已还原，接着写吧');
+  }
+
+  function deleteDraft(id, btn) {
+    writeDrafts(readDrafts().filter(function (x) { return x.id !== id; }));
+    renderDraftList();
+    updateDraftBadge();
+    toast('草稿已删除');
+  }
+
+  function updateDraftBadge() {
+    if (!draftBoxBtn) return;
+    var n = readDrafts().length;
+    draftBoxBtn.innerHTML = n ? '草稿箱 <span class="count">' + n + '</span>' : '草稿箱';
+  }
+
   /* ---------------- 点赞 ---------------- */
   function likeMessage(id, btn, cnt) {
     if (btn.dataset.busy) return;
@@ -1022,6 +1164,10 @@
     contentInput.focus();
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
+
+  if (draftBtn) draftBtn.addEventListener('click', saveDraft);
+  if (draftBoxBtn) draftBoxBtn.addEventListener('click', openDraftModal);
+  updateDraftBadge();
 
   /* 相对时间每分钟刷新一次 */
   setInterval(function () {
