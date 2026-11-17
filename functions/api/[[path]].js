@@ -5,6 +5,8 @@
  *       /api/banned（公开的禁用名字列表）
  *       /api/admin/login、/api/admin/logout、/api/admin/check
  *       /api/admin/banned（管理禁用名字）
+ *       /api/me/ban（查询当前设备是否被封禁账号）
+ *       /api/admin/accounts/bans、/api/admin/accounts/ban（封禁/解封账号）
  * 存储：复用仓库里已有的 KV 绑定 MSG_KV（不用 SQL 数据库）
  */
 
@@ -18,7 +20,9 @@ const MAX_REPLIES = 30;
 const KEY = "wall:messages";
 const BANNED_KEY = "wall:banned_names";
 const REGISTRY_KEY = "wall:name_registry";
+const ACCOUNT_BANS_KEY = "wall:banned_accounts";
 const DEFAULT_NAME = "匿名访客";
+const DAY_MS = 86400000;
 
 /* 管理员。默认密码不写明文，只放 SHA-256；KV 里有 wall:admin_password 时以 KV 为准 */
 const ADMIN_NAME = "管理员";
@@ -112,6 +116,11 @@ function sysSame(a, b) {
     && (a.device || "") === (b.device || "");
 }
 
+function sysKey(sys) {
+  if (!sys) return "none";
+  return [sys.ua || "", sys.os || "", sys.browser || "", sys.device || ""].join("|");
+}
+
 /* 名字占用：保留名（管理员名、匿名访客）不参与，任何设备都能用。
    同一设备判定：client_id 一致，或 UA/系统/浏览器/设备完全一致；不一致则名字已被占用。 */
 async function checkNameTaken(env, name, cid, sys) {
@@ -145,6 +154,179 @@ async function checkNameTaken(env, name, cid, sys) {
   if (sys) owner.sys = sys;
   await saveRegistry(env, reg);
   return { allowed: true };
+}
+
+/* ---------------- 账号封禁（按设备，不按名字；换名字也不能发） ---------------- */
+async function loadAccountBans(env) {
+  const raw = await env.MSG_KV.get(ACCOUNT_BANS_KEY, "json");
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+async function saveAccountBans(env, bans) {
+  await env.MSG_KV.put(ACCOUNT_BANS_KEY, JSON.stringify(bans));
+}
+
+function banMatches(ban, cid, sys) {
+  if (!ban) return false;
+  if (ban.client_id && cid && ban.client_id === cid) return true;
+  return sysSame(ban.sys, sys);
+}
+
+function banInfo(b, now) {
+  const forever = !b.expire_ms || b.expire_ms <= 0;
+  const msLeft = forever ? 0 : Math.max(0, b.expire_ms - now);
+  const daysLeft = forever ? -1 : Math.ceil(msLeft / DAY_MS);
+  return {
+    name: b.name || "",
+    reason: b.reason || "",
+    preset: b.preset || "",
+    days: b.days || 0,
+    forever: forever,
+    days_left: daysLeft,
+    expire_ms: b.expire_ms || 0,
+    banned_ms: b.banned_ms || 0,
+  };
+}
+
+/* 找出当前设备命中的有效封禁；顺带清理已过期条目。封禁跟着设备走，不跟着名字走。 */
+async function findActiveBan(env, cid, sys) {
+  const bans = await loadAccountBans(env);
+  const now = Date.now();
+  let changed = false;
+  let hit = null;
+  Object.keys(bans).forEach(function (k) {
+    const b = bans[k];
+    if (b.expire_ms && b.expire_ms > 0 && now > b.expire_ms) {
+      delete bans[k];
+      changed = true;
+      return;
+    }
+    if (!hit && banMatches(b, cid, sys)) hit = b;
+  });
+  if (changed) await saveAccountBans(env, bans);
+  return hit;
+}
+
+/* 访客自查当前设备是否被封禁 */
+async function meBanStatus(request, env) {
+  const body = await readJson(request);
+  const cid = cleanText(body.client_id, 64);
+  const sys = readSys(body, request);
+  const ban = await findActiveBan(env, cid, sys);
+  if (!ban) return json({ ok: true, banned: false });
+  return json({ ok: true, banned: true, ...banInfo(ban, Date.now()) });
+}
+
+/* 管理员：列出当前有效封禁 */
+async function adminBanList(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能操作" }, 403);
+  }
+  const bans = await loadAccountBans(env);
+  const now = Date.now();
+  const entries = Object.keys(bans)
+    .map(function (k) { return { key: k, ...banInfo(bans[k], now) }; })
+    .filter(function (e) { return e.forever || e.expire_ms > now; });
+  entries.sort(function (a, b) { return (b.banned_ms || 0) - (a.banned_ms || 0); });
+  return json({ ok: true, entries: entries });
+}
+
+/* 管理员：封禁某个名字当前绑定的设备。
+   - 删光该设备（兜底按名字）的留言和回复；
+   - 释放该名字的设备绑定，下一任使用者可以正常用这个名字；
+   - 封禁记在设备上，被封者换任何名字都不能发，解封/到期后名字也不会连累下一任。 */
+async function adminBanAccount(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能操作" }, 403);
+  }
+
+  const body = await readJson(request);
+  const name = cleanText(body.name, MAX_NAME);
+  const target = normName(name);
+  if (!target) return json({ ok: false, error: "要封禁的名字不能为空" }, 400);
+
+  let days = Number(body.days);
+  if (!Number.isFinite(days) || days < 0) days = 7;
+  days = Math.min(3650, Math.floor(days));
+
+  const preset = cleanText(body.preset, 30);
+  let reason = cleanText(body.reason, 80);
+  if (!reason) reason = preset || "违反留言墙规则";
+
+  const reg = await loadRegistry(env);
+  const owner = reg[target];
+  if (!owner) {
+    return json({ ok: false, error: "这个名字当前没有绑定设备，无法封禁账号；可改用「禁用名字」" }, 400);
+  }
+
+  const now = Date.now();
+  const expire_ms = days === 0 ? 0 : now + days * DAY_MS;
+  const key = owner.client_id ? "cid:" + owner.client_id : "sys:" + sysKey(owner.sys);
+
+  const bans = await loadAccountBans(env);
+  bans[key] = {
+    client_id: owner.client_id || "",
+    sys: owner.sys || null,
+    name: owner.name || name,
+    reason: reason,
+    preset: preset,
+    days: days,
+    banned_ms: now,
+    expire_ms: expire_ms,
+  };
+  await saveAccountBans(env, bans);
+
+  // 删除该设备的留言与回复（设备匹配优先，名字匹配兜底）
+  const list = await loadAll(env);
+  const keep = [];
+  let removedMessages = 0;
+  let removedReplies = 0;
+  list.forEach(function (m) {
+    const byDevice = sysSame(owner.sys, m.sys);
+    const byName = normName(m.name) === target;
+    if (byDevice || byName) {
+      removedMessages += 1;
+      return;
+    }
+    const replies = Array.isArray(m.replies) ? m.replies : [];
+    m.replies = replies.filter(function (r) {
+      const rByDevice = sysSame(owner.sys, r.sys);
+      const rByName = normName(r.name) === target;
+      if (rByDevice || rByName) {
+        removedReplies += 1;
+        return false;
+      }
+      return true;
+    });
+    keep.push(m);
+  });
+  await saveAll(env, keep);
+
+  // 释放名字绑定，名字留给下一任使用者
+  delete reg[target];
+  await saveRegistry(env, reg);
+
+  return json({
+    ok: true,
+    removed_messages: removedMessages,
+    removed_replies: removedReplies,
+    ban: banInfo(bans[key], now),
+  });
+}
+
+/* 管理员：解除某个设备的封禁 */
+async function adminUnbanAccount(request, env) {
+  if (!(await adminTokenValidStrict(request, env))) {
+    return json({ ok: false, error: "只有管理员能操作" }, 403);
+  }
+  const body = await readJson(request);
+  const key = cleanText(body.key, 100);
+  const bans = await loadAccountBans(env);
+  if (key && bans[key]) {
+    delete bans[key];
+    await saveAccountBans(env, bans);
+  }
+  return json({ ok: true });
 }
 
 function publicReply(r, withAdmin) {
@@ -425,12 +607,18 @@ async function createMessage(request, env) {
 
   if (!content) return json({ ok: false, error: "留言内容不能为空" }, 400);
 
+  const cid = cleanText(body.client_id, 64);
+  const sys = readSys(body, request);
+
+  const ban = await findActiveBan(env, cid, sys);
+  if (ban) {
+    return json({ ok: false, error: "您的账号已被封禁", code: "account_banned", ...banInfo(ban, Date.now()) }, 403);
+  }
+
   if (isBannedName(name, await loadBanned(env))) {
     return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
   }
 
-  const cid = cleanText(body.client_id, 64);
-  const sys = readSys(body, request);
   const owner = await checkNameTaken(env, name, cid, sys);
   if (!owner.allowed) {
     return json({ ok: false, error: "该名称已被占用，请换一个名称", code: owner.code }, 403);
@@ -495,12 +683,18 @@ async function createReply(request, env, id) {
 
   if (!content) return json({ ok: false, error: "回复内容不能为空" }, 400);
 
+  const cid = cleanText(body.client_id, 64);
+  const sys = readSys(body, request);
+
+  const ban = await findActiveBan(env, cid, sys);
+  if (ban) {
+    return json({ ok: false, error: "您的账号已被封禁", code: "account_banned", ...banInfo(ban, Date.now()) }, 403);
+  }
+
   if (isBannedName(name, await loadBanned(env))) {
     return json({ ok: false, error: "该名字已被禁用，请更换名字", code: "name_banned" }, 403);
   }
 
-  const cid = cleanText(body.client_id, 64);
-  const sys = readSys(body, request);
   const owner = await checkNameTaken(env, name, cid, sys);
   if (!owner.allowed) {
     return json({ ok: false, error: "该名称已被占用，请换一个名称", code: owner.code }, 403);
@@ -599,6 +793,11 @@ export async function onRequest(context) {
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
+    if (path === "/api/me/ban") {
+      if (method === "POST") return meBanStatus(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
     if (path === "/api/admin/login") {
       if (method === "POST") return adminLogin(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
@@ -624,6 +823,17 @@ export async function onRequest(context) {
     if (path === "/api/admin/registry") {
       if (method === "GET") return adminRegistryList(request, env);
       if (method === "DELETE") return adminRegistryRelease(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/accounts/bans") {
+      if (method === "GET") return adminBanList(request, env);
+      return json({ ok: false, error: "不支持这个方法" }, 405);
+    }
+
+    if (path === "/api/admin/accounts/ban") {
+      if (method === "POST") return adminBanAccount(request, env);
+      if (method === "DELETE") return adminUnbanAccount(request, env);
       return json({ ok: false, error: "不支持这个方法" }, 405);
     }
 
