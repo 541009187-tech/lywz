@@ -5,7 +5,7 @@
     yellow: 'note--yellow', pink: 'note--pink', blue: 'note--blue',
     green: 'note--green', lilac: 'note--lilac'
   };
-  var state = { order: 'new', q: '', offset: 0, limit: 9, total: 0, items: [], clock: 0, loading: false, admin: '' };
+  var state = { order: 'new', q: '', offset: 0, limit: 9, total: 0, items: [], clock: 0, loading: false, admin: '', ban: null };
   var freshIds = new Set();
   var bannedNames = [];
 
@@ -103,7 +103,10 @@
     return fetch(path, options).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (!res.ok || data.ok === false) {
-          throw new Error(data.error || ('请求没成功（' + res.status + '）'));
+          var e = new Error(data.error || ('请求没成功（' + res.status + '）'));
+          e.code = data.code || '';
+          e.data = data;
+          throw e;
         }
         return data;
       });
@@ -465,6 +468,12 @@
         render();
         toast('回复已经贴上了');
       }).catch(function (err) {
+        if (err.code === 'account_banned') {
+          state.ban = err.data;
+          applyBanUI();
+          showBanNotice(err.data);
+          return;
+        }
         toast(err.message || '回复没贴上');
         if (err.message && err.message.indexOf('已被占用') >= 0) nameInput.focus();
         send.disabled = false;
@@ -591,6 +600,12 @@
       toast('已经贴上墙了');
       notesEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(function (err) {
+      if (err.code === 'account_banned') {
+        state.ban = err.data;
+        applyBanUI();
+        showBanNotice(err.data);
+        return;
+      }
       toast(err.message || '没贴上，后台可能没开');
       if (err.message && err.message.indexOf('已被禁用') >= 0) {
         nameInput.focus();
@@ -599,7 +614,7 @@
         nameInput.focus();
       }
     }).then(function () {
-      submitBtn.disabled = false;
+      if (!state.ban) submitBtn.disabled = false;
       contentInput.focus();
     });
   });
@@ -817,6 +832,12 @@
     regBtn.textContent = '释放名字';
     regBtn.addEventListener('click', openRegModal);
 
+    var accBtn = document.createElement('button');
+    accBtn.type = 'button';
+    accBtn.className = 'admin-out';
+    accBtn.textContent = '封禁账号';
+    accBtn.addEventListener('click', openAccModal);
+
     var out = document.createElement('button');
     out.type = 'button';
     out.className = 'admin-out';
@@ -825,6 +846,7 @@
 
     actions.appendChild(banBtn);
     actions.appendChild(regBtn);
+    actions.appendChild(accBtn);
     actions.appendChild(out);
 
     bar.appendChild(tag);
@@ -1135,6 +1157,245 @@
     });
   }
 
+  /* ---------------- 账号封禁（按设备，换名字也不能发） ---------------- */
+  var ACC_PRESETS = ['不文明用语/骂人', '发广告/引流', '刷屏灌水', '骚扰他人', '其他（自定义）'];
+  var ACC_DAYS = [
+    { v: 1, l: '1 天' }, { v: 3, l: '3 天' }, { v: 7, l: '7 天' },
+    { v: 30, l: '30 天' }, { v: 0, l: '永久' }
+  ];
+
+  var accModal = null;
+  var banDialog = null;
+  var banDialogTarget = null;
+
+  function banTermText(b) {
+    if (!b) return '';
+    if (b.forever) return '永久封禁';
+    var d = b.days_left > 0 ? b.days_left : 1;
+    return '剩余 ' + d + ' 天';
+  }
+
+  function buildAccModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'accModal';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="accTitle">',
+      '  <h3 id="accTitle">封禁账号</h3>',
+      '  <p class="ban-hint">封禁记在设备上：被封的人换任何名字都不能发帖；他以前的留言会被清掉，名字释放后别人可以正常使用。</p>',
+      '  <p class="ban-sub">当前被封禁的账号</p>',
+      '  <div class="ban-list" id="accBanList"></div>',
+      '  <p class="ban-sub">可封禁的设备（占用中的名字）</p>',
+      '  <div class="ban-list" id="accRegList"></div>',
+      '  <div class="modal-actions"><button type="button" class="ghost" id="accClose">关闭</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.hidden = true; });
+    wrap.querySelector('#accClose').addEventListener('click', function () { wrap.hidden = true; });
+    return wrap;
+  }
+
+  function openAccModal() {
+    if (!accModal) accModal = buildAccModal();
+    accModal.hidden = false;
+    refreshAcc();
+  }
+
+  function refreshAcc() {
+    if (!state.admin) return;
+    api('/api/admin/accounts/bans', { headers: { 'X-Admin-Token': state.admin } })
+      .then(function (data) { drawBanList(Array.isArray(data.entries) ? data.entries : []); })
+      .catch(function () { drawBanList([]); });
+    api('/api/admin/registry', { headers: { 'X-Admin-Token': state.admin } })
+      .then(function (data) { drawAccRegList(Array.isArray(data.entries) ? data.entries : []); })
+      .catch(function () { drawAccRegList([]); });
+  }
+
+  function drawBanList(entries) {
+    var box = accModal.querySelector('#accBanList');
+    box.textContent = '';
+    if (!entries.length) {
+      var empty = document.createElement('p');
+      empty.className = 'ban-empty';
+      empty.textContent = '当前没有被封禁的账号。';
+      box.appendChild(empty);
+      return;
+    }
+    entries.forEach(function (b) {
+      var row = document.createElement('div');
+      row.className = 'ban-row';
+      var left = document.createElement('div');
+      left.className = 'reg-left';
+      var span = document.createElement('span');
+      span.className = 'ban-name';
+      span.textContent = b.name || '匿名访客';
+      var meta = document.createElement('span');
+      meta.className = 'ban-meta';
+      meta.textContent = (b.reason || '未填写原因') + ' · ' + banTermText(b);
+      left.appendChild(span);
+      left.appendChild(meta);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ban-del';
+      btn.textContent = '解封';
+      btn.addEventListener('click', function () { unbanAccount(b.key, btn); });
+      row.appendChild(left);
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  function drawAccRegList(entries) {
+    var box = accModal.querySelector('#accRegList');
+    box.textContent = '';
+    if (!entries.length) {
+      var empty = document.createElement('p');
+      empty.className = 'ban-empty';
+      empty.textContent = '当前没有占用中的名字。';
+      box.appendChild(empty);
+      return;
+    }
+    entries.forEach(function (e) {
+      var row = document.createElement('div');
+      row.className = 'ban-row';
+      var left = document.createElement('div');
+      left.className = 'reg-left';
+      var span = document.createElement('span');
+      span.className = 'ban-name';
+      span.textContent = e.name;
+      var meta = document.createElement('span');
+      meta.className = 'ban-meta';
+      var sys = sysText({ browser: e.browser, os: e.os, device: e.device });
+      meta.textContent = sys ? sys + ' · ' + timeText(e.last_ms) : timeText(e.last_ms);
+      left.appendChild(span);
+      left.appendChild(meta);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ban-del';
+      btn.textContent = '封禁';
+      btn.addEventListener('click', function () { openBanDialog(e.name); });
+      row.appendChild(left);
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  function buildBanDialog() {
+    var wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.id = 'banDialog';
+    wrap.hidden = true;
+    wrap.innerHTML = [
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="banDlgTitle">',
+      '  <h3 id="banDlgTitle">封禁账号</h3>',
+      '  <p class="ban-hint">将封禁「<span id="banDlgName"></span>」这台设备的账号。</p>',
+      '  <label class="mfield"><span>封禁时长</span><select id="banDays"></select></label>',
+      '  <label class="mfield"><span>封禁原因</span><select id="banPreset"></select></label>',
+      '  <label class="mfield"><span>自定义原因（选「其他」时填写）</span><input id="banReason" type="text" maxlength="80" placeholder="可自己写原因"></label>',
+      '  <div class="modal-actions">',
+      '    <button type="button" class="ghost" id="banDlgCancel">取消</button>',
+      '    <button type="button" class="solid" id="banDlgOk">确认封禁</button>',
+      '  </div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(wrap);
+
+    var daysSel = wrap.querySelector('#banDays');
+    ACC_DAYS.forEach(function (d) {
+      var opt = document.createElement('option');
+      opt.value = String(d.v);
+      opt.textContent = d.l;
+      daysSel.appendChild(opt);
+    });
+    var presetSel = wrap.querySelector('#banPreset');
+    ACC_PRESETS.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      presetSel.appendChild(opt);
+    });
+
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.hidden = true; });
+    wrap.querySelector('#banDlgCancel').addEventListener('click', function () { wrap.hidden = true; });
+    wrap.querySelector('#banDlgOk').addEventListener('click', submitBanDialog);
+    return wrap;
+  }
+
+  function openBanDialog(name) {
+    if (!banDialog) banDialog = buildBanDialog();
+    banDialogTarget = name;
+    banDialog.querySelector('#banDlgName').textContent = name;
+    banDialog.querySelector('#banReason').value = '';
+    banDialog.hidden = false;
+  }
+
+  function submitBanDialog() {
+    var days = Number(banDialog.querySelector('#banDays').value);
+    var preset = banDialog.querySelector('#banPreset').value;
+    var custom = banDialog.querySelector('#banReason').value.trim();
+    var reason = preset === '其他（自定义）' ? (custom || preset) : preset;
+
+    var okBtn = banDialog.querySelector('#banDlgOk');
+    okBtn.disabled = true;
+    api('/api/admin/accounts/ban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.admin },
+      body: JSON.stringify({ name: banDialogTarget, days: days, preset: preset, reason: reason })
+    }).then(function (data) {
+      banDialog.hidden = true;
+      refreshAcc();
+      toast('已封禁「' + banDialogTarget + '」，清掉留言 ' + data.removed_messages + ' 条、回复 ' + data.removed_replies + ' 条');
+    }).catch(function (err) {
+      toast(err.message);
+    }).then(function () {
+      okBtn.disabled = false;
+    });
+  }
+
+  function unbanAccount(key, btn) {
+    btn.disabled = true;
+    api('/api/admin/accounts/ban', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.admin },
+      body: JSON.stringify({ key: key })
+    }).then(function () {
+      toast('已解除封禁');
+      refreshAcc();
+    }).catch(function (err) {
+      toast(err.message);
+      btn.disabled = false;
+    });
+  }
+
+  /* 访客侧：当前设备是否被封禁 */
+  function applyBanUI() {
+    var banned = !!state.ban;
+    if (submitBtn) submitBtn.disabled = banned;
+    if (nameInput) nameInput.disabled = banned;
+    if (contentInput) contentInput.disabled = banned;
+  }
+
+  function showBanNotice(b) {
+    showNotice('您的账号已被封禁', [
+      '封禁时长：' + banTermText(b),
+      '原因：' + (b.reason || '未填写')
+    ]);
+  }
+
+  function checkMyBan() {
+    return api('/api/me/ban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: CLIENT_ID, sys: readSys() })
+    }).then(function (data) {
+      state.ban = data.banned ? data : null;
+      applyBanUI();
+      if (state.ban) showBanNotice(state.ban);
+    }).catch(function () {});
+  }
+
   /* ---------------- 排序、搜索、翻页 ---------------- */
   document.querySelectorAll('.tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -1187,6 +1448,9 @@
   }
 
   updateAdminUI();
+
+  /* 先确认当前设备有没有被封禁账号 */
+  checkMyBan();
 
   /* 打开页面先拿禁用名单：用过被禁名字的人会看到提示 */
   loadBannedNames().then(function () {
